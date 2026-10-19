@@ -36,3 +36,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 ## Additional Notes
 
 - **FastAPI and Pydantic** — Check that chapter links resolve after renaming a file.
+- **practical development** — Verify the change in both development and production builds.
