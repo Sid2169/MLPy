@@ -112,3 +112,7 @@ You should be able to:
 - Debug unfamiliar Python code and use documentation effectively.
 
 Avoid spending time on advanced metaprogramming, obscure language features, GUI programming, web frameworks beyond FastAPI, and deep Python internals unless a project requires them.
+
+## Additional Notes
+
+- **code examples** — Keep the related setup steps aligned with the current scripts.
