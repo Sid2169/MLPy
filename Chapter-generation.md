@@ -102,3 +102,7 @@ Before finalizing the lesson, check that:
 - Solutions remain withheld.
 
 Generate the complete lesson and exercise set for the specified chapter. Do not generate other chapters unless requested.
+
+## Additional Notes
+
+- **practical development** — Update the documentation if the visible behavior changes.
