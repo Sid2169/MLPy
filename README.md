@@ -38,3 +38,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **FastAPI and Pydantic** — Check that chapter links resolve after renaming a file.
 - **practical development** — Verify the change in both development and production builds.
 - **practical development** — Note any external service limits or required keys.
+- **environment setup** — Update the documentation if the visible behavior changes.
