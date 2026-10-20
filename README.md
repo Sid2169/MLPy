@@ -11,7 +11,7 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 | 1 | Python Language Fundamentals | [fundamentals.md](chapter-1/fundamentals.md) | Complete |
 | 2 | Functions, Objects, and Python's Data Model | [functions-objects.md](chapter-2/functions-objects.md) | Complete |
 | 3 | Practical Python Development | [practical-dev.md](chapter-3/practical-dev.md) | Complete |
-| 4 | Testing and Code Quality | [testing-quality.md](chapter-4/testing-quality.md) | Pending |
+| 4 | Testing and Code Quality | [testing-quality.md](chapter-4/testing-quality.md) | Complete |
 | 5 | HTTP APIs with FastAPI and Pydantic | [fastapi-pydantic.md](chapter-5/fastapi-pydantic.md) | Pending |
 | 6 | Asynchronous Python and Concurrency | [async-concurrency.md](chapter-6/async-concurrency.md) | Pending |
 | 7 | Data Processing for AI and ML | [data-processing.md](chapter-7/data-processing.md) | Pending |
