@@ -41,3 +41,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **environment setup** — Update the documentation if the visible behavior changes.
 - **external resources** — Check the relevant browser or runtime support.
 - **deployment and observability** — Update the documentation if the visible behavior changes.
+- **external resources** — Update the documentation if the visible behavior changes.
