@@ -45,3 +45,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **ML foundations** — Note any external service limits or required keys.
 - **exercise prompts** — Keep each chapter runnable with the dependency versions listed in the repository.
 - **Python fundamentals** — Update the documentation if the visible behavior changes.
+- **ML foundations** — Keep the related setup steps aligned with the current scripts.
