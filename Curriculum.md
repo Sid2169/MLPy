@@ -116,3 +116,4 @@ Avoid spending time on advanced metaprogramming, obscure language features, GUI 
 ## Additional Notes
 
 - **code examples** — Keep the related setup steps aligned with the current scripts.
+- **PyTorch workflows** — Prefer small, focused changes over broad rewrites.
