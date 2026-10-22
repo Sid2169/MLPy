@@ -43,3 +43,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **deployment and observability** — Update the documentation if the visible behavior changes.
 - **external resources** — Update the documentation if the visible behavior changes.
 - **ML foundations** — Note any external service limits or required keys.
+- **exercise prompts** — Keep each chapter runnable with the dependency versions listed in the repository.
