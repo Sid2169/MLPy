@@ -47,3 +47,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **Python fundamentals** — Update the documentation if the visible behavior changes.
 - **ML foundations** — Keep the related setup steps aligned with the current scripts.
 - **reference documents** — Keep the terminology consistent with the rest of the project.
+- **async and concurrency** — Keep the related setup steps aligned with the current scripts.
