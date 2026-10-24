@@ -107,3 +107,4 @@ Generate the complete lesson and exercise set for the specified chapter. Do not 
 
 - **practical development** — Update the documentation if the visible behavior changes.
 - **practical development** — Confirm the expected behavior on a clean checkout.
+- **Python fundamentals** — Confirm the expected behavior on a clean checkout.
