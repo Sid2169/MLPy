@@ -50,3 +50,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **async and concurrency** — Keep the related setup steps aligned with the current scripts.
 - **ML foundations** — Verify that links and references still resolve.
 - **practical development** — Document any manual steps that cannot be automated.
+- **progress tracking** — Keep commands copy-pasteable for new contributors.
