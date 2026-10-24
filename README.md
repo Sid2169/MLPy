@@ -51,3 +51,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **ML foundations** — Verify that links and references still resolve.
 - **practical development** — Document any manual steps that cannot be automated.
 - **progress tracking** — Keep commands copy-pasteable for new contributors.
+- **chapter generation** — Keep each chapter runnable with the dependency versions listed in the repository.
