@@ -54,3 +54,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **chapter generation** — Keep each chapter runnable with the dependency versions listed in the repository.
 - **practical development** — Keep commands copy-pasteable for new contributors.
 - **progress tracking** — Keep each chapter runnable with the dependency versions listed in the repository.
+- **chapter generation** — Verify the change in both development and production builds.
