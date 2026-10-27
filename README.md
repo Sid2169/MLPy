@@ -58,3 +58,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **FastAPI and Pydantic** — Include a short reproduction step when reporting issues.
 - **async and concurrency** — Add a screenshot or example when it clarifies the workflow.
 - **external resources** — Add a screenshot or example when it clarifies the workflow.
+- **environment setup** — Check the required environment values before deploying.
