@@ -17,7 +17,7 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 | 7 | Data Processing for AI and ML | [data-processing.md](chapter-7/data-processing.md) | Complete |
 | 8 | Python for Production AI Services | [ml-foundations.md](chapter-8/ml-foundations.md) | Complete |
 | 9 | Deep Learning with PyTorch | [dl-pytorch.md](chapter-9/dl-pytorch.md) | Complete |
-| 10 | LLM Applications | [llm-apps.md](chapter-10/llm-apps.md) | Pending |
+| 10 | LLM Applications | [llm-apps.md](chapter-10/llm-apps.md) | Complete |
 | 11 | Data Engineering | [data-engineering.md](chapter-11/data-engineering.md) | Pending |
 | 12 | Deployment and Observability | [deployment-observability.md](chapter-12/deployment-observability.md) | Pending |
 
