@@ -19,7 +19,7 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 | 9 | Deep Learning with PyTorch | [dl-pytorch.md](chapter-9/dl-pytorch.md) | Complete |
 | 10 | LLM Applications | [llm-apps.md](chapter-10/llm-apps.md) | Complete |
 | 11 | Data Engineering | [data-engineering.md](chapter-11/data-engineering.md) | Complete |
-| 12 | Deployment and Observability | [deployment-observability.md](chapter-12/deployment-observability.md) | Pending |
+| 12 | Deployment and Observability | [deployment-observability.md](chapter-12/deployment-observability.md) | Complete |
 
 ## Reference documents
 
