@@ -60,3 +60,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **external resources** — Add a screenshot or example when it clarifies the workflow.
 - **environment setup** — Check the required environment values before deploying.
 - **reference documents** — Confirm the expected behavior on a clean checkout.
+- **curriculum index** — Keep each chapter runnable with the dependency versions listed in the repository.
