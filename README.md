@@ -63,3 +63,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **curriculum index** — Keep each chapter runnable with the dependency versions listed in the repository.
 - **PyTorch workflows** — Check the required environment values before deploying.
 - **practical development** — Include a short reproduction step when reporting issues.
+- **progress tracking** — Use the existing project patterns when extending this area.
