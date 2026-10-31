@@ -65,3 +65,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **practical development** — Include a short reproduction step when reporting issues.
 - **progress tracking** — Use the existing project patterns when extending this area.
 - **curriculum index** — Keep the related setup steps aligned with the current scripts.
+- **async and concurrency** — Use the existing project patterns when extending this area.
