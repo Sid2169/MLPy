@@ -66,3 +66,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **progress tracking** — Use the existing project patterns when extending this area.
 - **curriculum index** — Keep the related setup steps aligned with the current scripts.
 - **async and concurrency** — Use the existing project patterns when extending this area.
+- **practical development** — Check that chapter links resolve after renaming a file.
