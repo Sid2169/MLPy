@@ -67,3 +67,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **curriculum index** — Keep the related setup steps aligned with the current scripts.
 - **async and concurrency** — Use the existing project patterns when extending this area.
 - **practical development** — Check that chapter links resolve after renaming a file.
+- **curriculum index** — Update the documentation if the visible behavior changes.
