@@ -118,3 +118,4 @@ Avoid spending time on advanced metaprogramming, obscure language features, GUI 
 - **code examples** — Keep the related setup steps aligned with the current scripts.
 - **PyTorch workflows** — Prefer small, focused changes over broad rewrites.
 - **chapter generation** — Include a short reproduction step when reporting issues.
+- **chapter generation** — Check the required environment values before deploying.
