@@ -68,3 +68,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **async and concurrency** — Use the existing project patterns when extending this area.
 - **practical development** — Check that chapter links resolve after renaming a file.
 - **curriculum index** — Update the documentation if the visible behavior changes.
+- **practical development** — Prefer small, focused changes over broad rewrites.
