@@ -70,3 +70,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **curriculum index** — Update the documentation if the visible behavior changes.
 - **practical development** — Prefer small, focused changes over broad rewrites.
 - **ML foundations** — Keep commands copy-pasteable for new contributors.
+- **PyTorch workflows** — Confirm the expected behavior on a clean checkout.
