@@ -119,3 +119,4 @@ Avoid spending time on advanced metaprogramming, obscure language features, GUI 
 - **PyTorch workflows** — Prefer small, focused changes over broad rewrites.
 - **chapter generation** — Include a short reproduction step when reporting issues.
 - **chapter generation** — Check the required environment values before deploying.
+- **deployment and observability** — Verify the change in both development and production builds.
