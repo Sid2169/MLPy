@@ -224,761 +224,6 @@ part = root / "date=2026-01-01" / "part-000.parquet"
 
 ---
 
-## 11.3 Schemas, validation, and type boundaries
-
-A schema is a set of field names, types, nullability rules, and constraints. Validate as early as possible: at ingestion, before transformation, and again before serving.
-
-Explicit types prevent silent corruption:
-
-```python
-import pandas as pd
-
-df = pd.read_csv(
-    "orders.csv",
-    dtype={
-        "order_id": "string",
-        "customer_id": "string",
-        "amount_cents": "int64",
-        "status": "string",
-    },
-    parse_dates=["created_at"],
-    na_values=["", "NULL", "null"],
-    keep_default_na=False,
-)
-```
-
-Rules:
-
-- Read identifiers as strings; leading zeros and long numeric IDs are not arithmetic values.
-- Read money as integer cents or `Decimal`, not binary float.
-- Parse dates explicitly and decide on timezone awareness.
-- Use nullable integer and boolean dtypes when missing values are possible.
-- Do not let pandas infer critical columns from a sample.
-- Reject unknown enum values or map them deliberately.
-
-Null semantics differ:
-
-- pandas may use `NaN`, `NaT`, or `pd.NA` depending on dtype.
-- Python `None` is not the same as `float("nan")`.
-- SQL `NULL` means unknown; comparisons with `NULL` yield unknown, not true.
-- JSON `null` becomes `None`.
-- CSV empty strings may mean missing, zero, or an empty string; decide per column.
-
-A small validation model can be a dataclass plus explicit checks:
-
-```python
-from dataclasses import dataclass
-from datetime import datetime
-
-@dataclass(frozen=True)
-class Order:
-    order_id: str
-    customer_id: str
-    amount_cents: int
-    created_at: datetime
-
-    def __post_init__(self) -> None:
-        if not self.order_id:
-            raise ValueError("order_id is required")
-        if self.amount_cents < 0:
-            raise ValueError("amount_cents must be non-negative")
-        if self.created_at.tzinfo is None:
-            raise ValueError("created_at must be timezone-aware")
-```
-
-Pydantic is convenient at API boundaries; dataclasses are enough for internal records. The important part is that invalid records do not silently enter the trusted layer.
-
-Schema evolution:
-
-- Adding an optional field is usually backward-compatible.
-- Adding a required field is breaking unless consumers have a default.
-- Renaming a field breaks consumers unless both names are supported during a transition.
-- Changing a type, unit, or timezone is a semantic change even if the name is unchanged.
-- Removing a field is breaking unless no consumer reads it.
-
-Record a schema version with the data. Validate the contract before publishing.
-
----
-
-## 11.4 SQL and relational thinking
-
-SQL is the default language for joins, aggregation, and set operations. pandas is convenient for local exploration; SQL is often clearer and more scalable for relational work.
-
-SQLite is built into Python and supports transactions, constraints, indexes, CTEs, and window functions:
-
-```python
-import sqlite3
-
-con = sqlite3.connect("pipeline.db")
-con.row_factory = sqlite3.Row
-con.execute("PRAGMA foreign_keys = ON")
-
-with con:
-    con.execute(
-        "INSERT INTO docs (id, title, updated_at) VALUES (?, ?, ?)",
-        ("doc-1", "Intro", "2026-01-01T00:00:00Z"),
-    )
-```
-
-Rules:
-
-- Never interpolate values into SQL strings. Use parameters (`?` for SQLite, `%s` for many drivers).
-- Use a transaction for multi-statement changes. `with con:` commits on success and rolls back on exception.
-- Enable foreign keys in SQLite; they are off by default.
-- Use `executemany` for batches instead of a Python loop of `execute`.
-- Set a busy timeout and handle lock contention.
-- Use `row_factory` to access columns by name, but convert to plain data before it leaks across layers.
-
-### NULL semantics
-
-```sql
-SELECT COUNT(*) FROM orders;          -- counts rows
-SELECT COUNT(customer_id) FROM orders; -- counts non-NULL customer_id
-```
-
-`NULL = NULL` is unknown, not true. Use `IS NULL` and `IS DISTINCT FROM` where supported. `NOT IN` with a subquery that returns `NULL` can produce unexpected empty results; filter nulls or use `NOT EXISTS`.
-
-### Joins and fanout
-
-An inner join returns matching rows. A left join keeps all left rows and fills unmatched right columns with `NULL`.
-
-A join on a non-unique key multiplies rows. That is sometimes intended, but usually it is a bug:
-
-```sql
-SELECT o.id, c.segment
-FROM orders AS o
-LEFT JOIN customers AS c
-  ON c.customer_id = o.customer_id;
-```
-
-Before joining, check key uniqueness:
-
-```sql
-SELECT customer_id, COUNT(*) AS n
-FROM customers
-GROUP BY customer_id
-HAVING COUNT(*) > 1;
-```
-
-Validate join cardinality in pandas too:
-
-```python
-merged = orders.merge(
-    customers,
-    on="customer_id",
-    how="left",
-    validate="many_to_one",
-)
-```
-
-`validate` raises when the relationship is not what you expected. Use it.
-
-### Aggregation and windows
-
-```sql
-SELECT
-    customer_id,
-    COUNT(*) AS orders,
-    SUM(amount_cents) AS total_cents
-FROM orders
-GROUP BY customer_id
-HAVING SUM(amount_cents) > 10000;
-```
-
-Window functions keep row detail while computing across a partition:
-
-```sql
-SELECT
-    id,
-    doc_id,
-    updated_at,
-    ROW_NUMBER() OVER (
-        PARTITION BY doc_id
-        ORDER BY updated_at DESC, id DESC
-    ) AS rn
-FROM documents;
-```
-
-Filter the window result in an outer query or CTE; you cannot use a window alias in `WHERE` at the same query level.
-
-```sql
-WITH ranked AS (
-    SELECT *,
-           ROW_NUMBER() OVER (
-               PARTITION BY doc_id
-               ORDER BY updated_at DESC, id DESC
-           ) AS rn
-    FROM documents
-)
-SELECT * FROM ranked WHERE rn = 1;
-```
-
-Use deterministic tie-breakers. Without `id DESC`, two rows with the same timestamp have no defined order.
-
-### Indexes and transactions
-
-An index speeds reads at the cost of writes and storage. Add indexes for selective filters and join keys, then inspect the query plan:
-
-```sql
-EXPLAIN QUERY PLAN
-SELECT * FROM orders WHERE customer_id = ?;
-```
-
-Transactions protect atomicity. For a read-modify-write sequence that must not interleave, SQLite supports `BEGIN IMMEDIATE`. Keep transactions short; do not hold them open while calling an external API.
-
-### SQL versus pandas
-
-Use SQL when:
-
-- data is already in a relational store
-- joins and aggregations are large
-- the database can filter and aggregate before transfer
-- other teams need a shared, inspectable definition
-
-Use pandas when:
-
-- data is small enough to fit in memory
-- you need exploratory transformations
-- the logic is easier to express with arrays or time series
-- you are preparing a local fixture or test
-
-Do not pull an entire table into pandas just to filter it; push filters into SQL.
-
----
-
-## 11.5 pandas ingestion, transforms, and joins
-
-Read only the columns and rows you need:
-
-```python
-df = pd.read_csv(
-    path,
-    usecols=["order_id", "customer_id", "amount_cents", "created_at"],
-    dtype={"order_id": "string", "customer_id": "string", "amount_cents": "int64"},
-    parse_dates=["created_at"],
-    chunksize=100_000,
-)
-```
-
-With `chunksize`, the result is an iterator of DataFrames. Process each chunk and release it; do not append every chunk to a list unless the data is small.
-
-Memory habits:
-
-- Prefer `category` for low-cardinality string columns.
-- Use nullable dtypes for integer/boolean columns with missing values.
-- Drop unused columns early.
-- Avoid `object` columns when a typed dtype will do.
-- Avoid `iterrows` and row-wise `apply` for large data; vectorize or use SQL.
-- Convert to NumPy only when the operation benefits.
-
-Cleaning:
-
-```python
-df["email"] = df["email"].str.strip().str.lower()
-df["status"] = df["status"].astype("category")
-df["amount_cents"] = pd.to_numeric(df["amount_cents"], errors="raise")
-```
-
-`errors="raise"` is usually better than silently turning bad values into `NaN`. Decide explicitly whether invalid values should fail, quarantine, or map to a known value.
-
-Duplicates:
-
-```python
-df = df.drop_duplicates(subset=["order_id"], keep="last")
-```
-
-`keep="last"` assumes the file is ordered by recency. If it is not, sort by an explicit timestamp and tie-breaker first.
-
-Joins:
-
-```python
-merged = orders.merge(
-    customers,
-    on="customer_id",
-    how="left",
-    validate="many_to_one",
-    indicator=True,
-)
-```
-
-`indicator=True` adds `_merge` with `left_only`, `right_only`, or `both`. Use it to detect missing dimensions instead of silently dropping them.
-
-Aggregation:
-
-```python
-summary = (
-    orders.groupby(["customer_id", "status"], observed=True)
-    .agg(
-        orders=("order_id", "nunique"),
-        total_cents=("amount_cents", "sum"),
-    )
-    .reset_index()
-)
-```
-
-Use `observed=True` with categorical groupers to avoid empty category combinations. Name aggregations clearly; avoid MultiIndex columns that confuse downstream consumers.
-
-### Datetimes and timezones
-
-- Parse timestamps with an explicit format when possible.
-- Decide whether to store UTC or local time; usually store UTC.
-- Keep timezone-aware timestamps until you deliberately convert.
-- Do not compare naive and aware datetimes.
-- Use `pd.Timestamp`/`datetime` rather than strings for arithmetic.
-- Record the source timezone if it differs from UTC.
-
-```python
-df["created_at"] = pd.to_datetime(df["created_at"], utc=True)
-df["created_date"] = df["created_at"].dt.date
-```
-
-### Writing
-
-CSV is for interchange and inspection. Parquet is for typed analytical storage. When writing Parquet, preserve dtypes and partition deliberately.
-
-```python
-df.to_parquet("gold/orders.parquet", index=False)
-```
-
-Avoid writing many tiny files. Aim for file sizes that match the storage and query engine; compact small files during maintenance.
-
-pandas is not a distributed system. If the data does not fit in memory, push work into SQL, process in chunks, or use a distributed engine. Do not rely on swap space as a scaling strategy.
-
----
-
-## 11.6 Incremental loads, idempotency, and upserts
-
-An incremental pipeline processes changes since a checkpoint.
-
-A watermark is the high-water mark of processed data:
-
-```sql
-SELECT *
-FROM orders
-WHERE updated_at > :last_watermark
-ORDER BY updated_at, order_id;
-```
-
-Use `>` or `>=` deliberately:
-
-- `>` avoids reprocessing the boundary row, but can miss rows with the same timestamp.
-- `>=` reprocesses the boundary, so the write must be idempotent.
-- A common compromise is `>=` with an overlap window and deduplication by key and version.
-
-Late-arriving data is the hard part. A row with an old `updated_at` can arrive after the watermark has moved past it. Options:
-
-- maintain an overlap window (reprocess the last N minutes/hours)
-- use a source sequence number instead of a timestamp
-- run periodic reconciliation
-- accept bounded lateness and document it
-
-Idempotency means running the same batch twice has the same effect as running it once. Techniques:
-
-- deterministic batch and file names
-- content hashes
-- unique keys and constraints
-- upserts keyed by primary key and source version
-- staging tables plus a single merge
-- delete-and-reinsert inside a transaction for a bounded partition
-- exactly-once consumption is not free; at-least-once delivery plus idempotent writes is usually the practical design
-
-SQLite upsert:
-
-```sql
-INSERT INTO documents (id, text, updated_at, source_version)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET
-    text = excluded.text,
-    updated_at = excluded.updated_at,
-    source_version = excluded.source_version
-WHERE excluded.source_version >= documents.source_version;
-```
-
-The `WHERE` prevents an older record from overwriting a newer one. Choose `>` or `>=` based on whether equal versions can differ. Include a tie-breaker if the source version is not unique.
-
-Staging and merge:
-
-```text
-1. Load the batch into a staging table.
-2. Validate and deduplicate staging rows.
-3. Merge into the target in one transaction.
-4. Record the batch ID and watermark only after commit.
-```
-
-If the process crashes after the merge but before recording the watermark, the next run reprocesses the batch. The upsert must make that safe.
-
-Deletes:
-
-- A full snapshot can detect deletions by comparing keys.
-- An incremental feed may send delete events or soft-delete flags.
-- Hard deletes need tombstones or a reconciliation job.
-- Never infer deletion from absence in a partial batch.
-
-Backfills:
-
-- Replay a historical window with the current code.
-- Write to a staging location or a separate partition first.
-- Validate row counts and metrics before swapping.
-- Keep the old output until the new output is verified.
-- Make the backfill idempotent so it can be retried.
-
-Incremental aggregation is harder than incremental row loading. If an order changes from `pending` to `paid`, a naive `SUM` over only new rows is wrong. Recompute the affected aggregates from the source of truth, or maintain a changelog and apply deltas with correction logic.
-
-Schema evolution in an incremental pipeline:
-
-- Add nullable columns with defaults.
-- Read old and new schemas in the transformation layer.
-- Version the target table and migrate deliberately.
-- Do not silently coerce a changed unit (cents to dollars, seconds to milliseconds).
-
----
-
-## 11.7 Orchestration, DAGs, retries, and checkpoints
-
-A pipeline is a directed acyclic graph of tasks:
-
-```text
-extract → validate → transform → load → quality_check → publish
-```
-
-Dependencies must be explicit. A cycle is a configuration bug.
-
-A minimal topological runner:
-
-```python
-from collections import defaultdict, deque
-
-def topological_order(graph: dict[str, set[str]]) -> list[str]:
-    nodes = set(graph) | {dep for deps in graph.values() for dep in deps}
-    indegree = {node: 0 for node in nodes}
-    children: dict[str, set[str]] = defaultdict(set)
-
-    for node, deps in graph.items():
-        for dep in deps:
-            indegree[node] += 1
-            children[dep].add(node)
-
-    queue = deque(sorted(node for node, degree in indegree.items() if degree == 0))
-    order = []
-
-    while queue:
-        node = queue.popleft()
-        order.append(node)
-        for child in sorted(children[node]):
-            indegree[child] -= 1
-            if indegree[child] == 0:
-                queue.append(child)
-
-    if len(order) != len(nodes):
-        raise ValueError("cycle detected")
-    return order
-```
-
-Task rules:
-
-- A task must be idempotent: rerunning it must not duplicate side effects.
-- Retry transient failures with bounded exponential backoff and jitter.
-- Do not retry validation failures, permission errors, or malformed input indefinitely.
-- Persist a checkpoint only after the task's side effect commits.
-- Record run ID, batch ID, attempt, start/end time, row counts, and error class.
-- Limit concurrency to protect the source, warehouse, and downstream services.
-- Use a lock or a unique run key to prevent overlapping runs for the same window.
-- On partial failure, rerun only the failed task and its dependents.
-
-Scheduling:
-
-- Use timezone-aware schedules; daylight-saving transitions matter.
-- Define catchup/backfill behavior explicitly.
-- Do not let a failed run silently skip its window.
-- Align windows to the source's update semantics, not just midnight.
-- Separate extract, transform, and publish so each can be retried independently.
-
-Frameworks such as Airflow, Prefect, and Dagster add scheduling, retries, backfills, metadata, and UI. The concepts are the same; a framework does not make a non-idempotent task safe.
-
-Backpressure:
-
-- Bound the number of in-flight records and concurrent requests.
-- Apply rate limits when reading from APIs.
-- Write in batches, not one row per transaction.
-- Handle a slow consumer without unbounded memory growth.
-
-Dead letters:
-
-- Quarantine records that cannot be processed.
-- Include the error class, row payload, batch ID, and timestamp.
-- Provide a replay path after the bug is fixed.
-- Do not let a single malformed row block an entire batch unless the contract requires it.
-
----
-
-## 11.8 Data quality and contracts
-
-Data quality checks are executable expectations:
-
-- schema: required columns, types, nullability
-- uniqueness: primary keys and deduplication keys
-- completeness: null rate, required fields
-- validity: ranges, enums, formats
-- consistency: cross-field rules, units, timezone
-- referential integrity: foreign keys
-- freshness: maximum age of the newest record
-- volume: row-count bounds compared with history
-- distribution: category proportions or numeric ranges
-
-Classify severity:
-
-- **error:** block publication; data is not trustworthy.
-- **warn:** publish with a visible warning and investigate.
-- **info:** record for trend analysis.
-
-A simple expectation framework:
-
-```python
-from dataclasses import dataclass
-from typing import Callable, Literal
-import pandas as pd
-
-@dataclass(frozen=True)
-class Expectation:
-    name: str
-    severity: Literal["error", "warn", "info"]
-    check: Callable[[pd.DataFrame], bool]
-```
-
-Checks should return evidence, not only a boolean:
-
-```python
-def no_duplicate_order_ids(df: pd.DataFrame) -> tuple[bool, dict]:
-    duplicated = df["order_id"].duplicated(keep=False)
-    sample = df.loc[duplicated, "order_id"].head(10).tolist()
-    return not duplicated.any(), {"count": int(duplicated.sum()), "sample": sample}
-```
-
-Quarantine instead of silently dropping bad rows. A quarantine record should include the raw payload, the failed expectation, the batch ID, and enough context to reproduce the failure. Quarantined data needs an owner and a replay process.
-
-Schema drift:
-
-- New columns may be additive or unexpected.
-- Missing columns are usually breaking.
-- Changed types are breaking.
-- Changed nullability can break consumers.
-- Changed units or timezones are semantic breaks.
-
-Fail the contract when a breaking change appears. Do not let a pipeline infer a new schema and continue silently.
-
-Data quality metrics should be monitored over time:
-
-- null rate by column
-- duplicate rate by key
-- row count versus the same weekday last week
-- freshness lag
-- rejected/quarantined rows
-- distribution shift by category
-
-A quality check that never fails is not necessarily healthy; it may be too weak or never running.
-
----
-
-## 11.9 Testing pipelines
-
-Test the pure transformation first:
-
-```python
-def normalize_status(value: str) -> str:
-    mapping = {"paid": "paid", "PAID": "paid", "pending": "pending"}
-    if value not in mapping:
-        raise ValueError(f"unknown status: {value!r}")
-    return mapping[value]
-```
-
-Unit tests should use small, hand-checked fixtures. Include:
-
-- empty input
-- all-null column
-- duplicate keys
-- boundary timestamps
-- unexpected enum values
-- Unicode and whitespace
-- large/small batch boundaries
-- idempotent rerun
-
-For SQL, use a temporary SQLite database:
-
-```python
-import sqlite3
-
-def make_db() -> sqlite3.Connection:
-    con = sqlite3.connect(":memory:")
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys = ON")
-    con.executescript("""
-        CREATE TABLE orders (
-            order_id TEXT PRIMARY KEY,
-            customer_id TEXT NOT NULL,
-            amount_cents INTEGER NOT NULL
-        );
-    """)
-    return con
-```
-
-Test the pipeline end to end on temporary files and a temporary database. Assert:
-
-- output schema and dtypes
-- row count and key uniqueness
-- expected values for a few hand-checked rows
-- idempotency after running twice
-- incremental behavior with late data
-- quarantine behavior for invalid rows
-- failure rollback
-
-Failure injection:
-
-- make the loader raise after the first batch
-- close the database during a write
-- provide a malformed file
-- simulate a stale checkpoint
-- run two workers on the same window
-
-Golden files are useful for stable serialized output, but normalize volatile fields (timestamps, random IDs, file paths) before comparing. Otherwise the tests fail for irrelevant reasons.
-
-Property-based tests are useful for parsers and invariants: round-trip serialization, chunk boundaries, deduplication, and ordering.
-
-Determinism:
-
-- inject a clock instead of calling `datetime.now()` directly
-- inject an ID generator instead of using random UUIDs
-- sort outputs where order is not semantically meaningful
-- seed any randomness
-- pin library versions
-
-Do not use production data in tests. Use synthetic fixtures or a privacy-safe sample.
-
----
-
-## 11.10 Observability, lineage, privacy, and cost
-
-A pipeline needs to answer:
-
-- Did it run?
-- How long did it take?
-- How many rows were read, written, rejected?
-- How fresh is the output?
-- Which source and code version produced it?
-- Who consumes it?
-- Did quality or cost change?
-
-Logs should be structured:
-
-```python
-import logging
-
-logger = logging.getLogger(__name__)
-logger.info(
-    "batch_complete",
-    extra={
-        "batch_id": batch_id,
-        "source": source,
-        "rows_in": rows_in,
-        "rows_out": rows_out,
-        "rows_quarantined": rows_quarantined,
-        "duration_ms": duration_ms,
-    },
-)
-```
-
-Metrics:
-
-- rows processed and rejected
-- freshness lag
-- task duration and retries
-- checkpoint position
-- bytes read/written
-- cost per run or per tenant
-- quality expectation failures
-
-Lineage:
-
-- source dataset and version
-- transformation code version
-- prompt/model version if applicable
-- output dataset and partition
-- downstream consumers
-- schema version
-
-Lineage makes it possible to answer “which outputs are affected by this bad input?” without guessing.
-
-Privacy:
-
-- minimize PII at ingestion
-- hash or tokenize identifiers when raw values are not needed
-- restrict access to raw layers
-- set retention and deletion policies
-- avoid logging raw payloads
-- test that deleted records do not reappear after a replay
-- separate tenant data physically or logically
-
-Cost:
-
-- partition by common filters
-- compress columnar files
-- avoid tiny files
-- prune old partitions
-- push filters into SQL
-- avoid repeatedly scanning the same large table
-- cache or materialize expensive intermediate results
-- measure bytes scanned, not just rows
-
-A pipeline that is correct but scans ten times more data than necessary is still a production problem.
-
----
-
-## 11.11 Common mistakes and conventions
-
-Mistakes to avoid:
-
-1. Reading IDs as numbers and losing leading zeros.
-2. Letting pandas infer dtypes for critical columns.
-3. Comparing naive and timezone-aware datetimes.
-4. Using floats for money.
-5. Treating CSV as a typed format.
-6. Writing output directly to the final path.
-7. Assuming a file write is atomic across filesystems.
-8. Retrying a non-idempotent task.
-9. Recording a checkpoint before the write commits.
-10. Using `>` watermarks without handling equal timestamps or late data.
-11. Joining on a non-unique key and silently multiplying rows.
-12. Using `NOT IN` with NULLs.
-13. Building SQL with f-strings.
-14. Fetching a whole table into pandas just to filter it.
-15. Using `iterrows` for large transforms.
-16. Dropping invalid rows without quarantine or metrics.
-17. Inferring deletion from absence in a partial batch.
-18. Letting schema drift pass silently.
-19. Holding a transaction open during a network call.
-20. Running overlapping jobs for the same window.
-21. Backfilling directly into production without validation.
-22. Writing many tiny files.
-23. Logging raw PII or secrets.
-24. Testing only the happy path.
-25. Treating a successful job as proof that the data is correct.
-
-Conventions:
-
-- Land raw data immutably; validate before transforming.
-- Declare schemas and contracts explicitly.
-- Use stable keys, deterministic batch IDs, and idempotent writes.
-- Use transactions for multi-statement changes.
-- Check join cardinality before merging.
-- Record watermarks only after successful commits.
-- Quarantine bad records with enough context to replay.
-- Test empty, duplicate, late, and malformed inputs.
-- Emit row counts, freshness, quality, and lineage for every run.
-- Keep PII out of logs and minimize it in storage.
-- Partition and compress for the queries you actually run.
-- Prefer the simplest pipeline that meets the freshness and volume requirements.
-
----
-
 # Exercises
 
 Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
@@ -1190,6 +435,82 @@ Then explain how you would test each failure mode.
 
 ---
 
+## 11.3 Schemas, validation, and type boundaries
+
+A schema is a set of field names, types, nullability rules, and constraints. Validate as early as possible: at ingestion, before transformation, and again before serving.
+
+Explicit types prevent silent corruption:
+
+```python
+import pandas as pd
+
+df = pd.read_csv(
+    "orders.csv",
+    dtype={
+        "order_id": "string",
+        "customer_id": "string",
+        "amount_cents": "int64",
+        "status": "string",
+    },
+    parse_dates=["created_at"],
+    na_values=["", "NULL", "null"],
+    keep_default_na=False,
+)
+```
+
+Rules:
+
+- Read identifiers as strings; leading zeros and long numeric IDs are not arithmetic values.
+- Read money as integer cents or `Decimal`, not binary float.
+- Parse dates explicitly and decide on timezone awareness.
+- Use nullable integer and boolean dtypes when missing values are possible.
+- Do not let pandas infer critical columns from a sample.
+- Reject unknown enum values or map them deliberately.
+
+Null semantics differ:
+
+- pandas may use `NaN`, `NaT`, or `pd.NA` depending on dtype.
+- Python `None` is not the same as `float("nan")`.
+- SQL `NULL` means unknown; comparisons with `NULL` yield unknown, not true.
+- JSON `null` becomes `None`.
+- CSV empty strings may mean missing, zero, or an empty string; decide per column.
+
+A small validation model can be a dataclass plus explicit checks:
+
+```python
+from dataclasses import dataclass
+from datetime import datetime
+
+@dataclass(frozen=True)
+class Order:
+    order_id: str
+    customer_id: str
+    amount_cents: int
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.order_id:
+            raise ValueError("order_id is required")
+        if self.amount_cents < 0:
+            raise ValueError("amount_cents must be non-negative")
+        if self.created_at.tzinfo is None:
+            raise ValueError("created_at must be timezone-aware")
+```
+
+Pydantic is convenient at API boundaries; dataclasses are enough for internal records. The important part is that invalid records do not silently enter the trusted layer.
+
+Schema evolution:
+
+- Adding an optional field is usually backward-compatible.
+- Adding a required field is breaking unless consumers have a default.
+- Renaming a field breaks consumers unless both names are supported during a transition.
+- Changing a type, unit, or timezone is a semantic change even if the name is unchanged.
+- Removing a field is breaking unless no consumer reads it.
+
+Record a schema version with the data. Validate the contract before publishing.
+
+---
+
 ## Group B — Schemas, validation, and type boundaries
 
 **B1.** Write an explicit dtype mapping for a CSV with order ID, customer ID, amount in cents, status, and created timestamp. Answer:
@@ -1363,6 +684,152 @@ when one value in `amount_cents` is empty. Then explain how a nullable integer d
 2. How do you keep processing the rest?
 3. What does `RejectedRow` contain?
 4. How do you test a file where every row is invalid?
+
+---
+
+## 11.4 SQL and relational thinking
+
+SQL is the default language for joins, aggregation, and set operations. pandas is convenient for local exploration; SQL is often clearer and more scalable for relational work.
+
+SQLite is built into Python and supports transactions, constraints, indexes, CTEs, and window functions:
+
+```python
+import sqlite3
+
+con = sqlite3.connect("pipeline.db")
+con.row_factory = sqlite3.Row
+con.execute("PRAGMA foreign_keys = ON")
+
+with con:
+    con.execute(
+        "INSERT INTO docs (id, title, updated_at) VALUES (?, ?, ?)",
+        ("doc-1", "Intro", "2026-01-01T00:00:00Z"),
+    )
+```
+
+Rules:
+
+- Never interpolate values into SQL strings. Use parameters (`?` for SQLite, `%s` for many drivers).
+- Use a transaction for multi-statement changes. `with con:` commits on success and rolls back on exception.
+- Enable foreign keys in SQLite; they are off by default.
+- Use `executemany` for batches instead of a Python loop of `execute`.
+- Set a busy timeout and handle lock contention.
+- Use `row_factory` to access columns by name, but convert to plain data before it leaks across layers.
+
+### NULL semantics
+
+```sql
+SELECT COUNT(*) FROM orders;          -- counts rows
+SELECT COUNT(customer_id) FROM orders; -- counts non-NULL customer_id
+```
+
+`NULL = NULL` is unknown, not true. Use `IS NULL` and `IS DISTINCT FROM` where supported. `NOT IN` with a subquery that returns `NULL` can produce unexpected empty results; filter nulls or use `NOT EXISTS`.
+
+### Joins and fanout
+
+An inner join returns matching rows. A left join keeps all left rows and fills unmatched right columns with `NULL`.
+
+A join on a non-unique key multiplies rows. That is sometimes intended, but usually it is a bug:
+
+```sql
+SELECT o.id, c.segment
+FROM orders AS o
+LEFT JOIN customers AS c
+  ON c.customer_id = o.customer_id;
+```
+
+Before joining, check key uniqueness:
+
+```sql
+SELECT customer_id, COUNT(*) AS n
+FROM customers
+GROUP BY customer_id
+HAVING COUNT(*) > 1;
+```
+
+Validate join cardinality in pandas too:
+
+```python
+merged = orders.merge(
+    customers,
+    on="customer_id",
+    how="left",
+    validate="many_to_one",
+)
+```
+
+`validate` raises when the relationship is not what you expected. Use it.
+
+### Aggregation and windows
+
+```sql
+SELECT
+    customer_id,
+    COUNT(*) AS orders,
+    SUM(amount_cents) AS total_cents
+FROM orders
+GROUP BY customer_id
+HAVING SUM(amount_cents) > 10000;
+```
+
+Window functions keep row detail while computing across a partition:
+
+```sql
+SELECT
+    id,
+    doc_id,
+    updated_at,
+    ROW_NUMBER() OVER (
+        PARTITION BY doc_id
+        ORDER BY updated_at DESC, id DESC
+    ) AS rn
+FROM documents;
+```
+
+Filter the window result in an outer query or CTE; you cannot use a window alias in `WHERE` at the same query level.
+
+```sql
+WITH ranked AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY doc_id
+               ORDER BY updated_at DESC, id DESC
+           ) AS rn
+    FROM documents
+)
+SELECT * FROM ranked WHERE rn = 1;
+```
+
+Use deterministic tie-breakers. Without `id DESC`, two rows with the same timestamp have no defined order.
+
+### Indexes and transactions
+
+An index speeds reads at the cost of writes and storage. Add indexes for selective filters and join keys, then inspect the query plan:
+
+```sql
+EXPLAIN QUERY PLAN
+SELECT * FROM orders WHERE customer_id = ?;
+```
+
+Transactions protect atomicity. For a read-modify-write sequence that must not interleave, SQLite supports `BEGIN IMMEDIATE`. Keep transactions short; do not hold them open while calling an external API.
+
+### SQL versus pandas
+
+Use SQL when:
+
+- data is already in a relational store
+- joins and aggregations are large
+- the database can filter and aggregate before transfer
+- other teams need a shared, inspectable definition
+
+Use pandas when:
+
+- data is small enough to fit in memory
+- you need exploratory transformations
+- the logic is easier to express with arrays or time series
+- you are preparing a local fixture or test
+
+Do not pull an entire table into pandas just to filter it; push filters into SQL.
 
 ---
 
@@ -1568,6 +1035,106 @@ Then answer why storing timestamps as text requires a consistent format.
 2. Which is easier to test locally?
 3. Which scales better as the table grows?
 4. When is pandas the better choice?
+
+---
+
+## 11.5 pandas ingestion, transforms, and joins
+
+Read only the columns and rows you need:
+
+```python
+df = pd.read_csv(
+    path,
+    usecols=["order_id", "customer_id", "amount_cents", "created_at"],
+    dtype={"order_id": "string", "customer_id": "string", "amount_cents": "int64"},
+    parse_dates=["created_at"],
+    chunksize=100_000,
+)
+```
+
+With `chunksize`, the result is an iterator of DataFrames. Process each chunk and release it; do not append every chunk to a list unless the data is small.
+
+Memory habits:
+
+- Prefer `category` for low-cardinality string columns.
+- Use nullable dtypes for integer/boolean columns with missing values.
+- Drop unused columns early.
+- Avoid `object` columns when a typed dtype will do.
+- Avoid `iterrows` and row-wise `apply` for large data; vectorize or use SQL.
+- Convert to NumPy only when the operation benefits.
+
+Cleaning:
+
+```python
+df["email"] = df["email"].str.strip().str.lower()
+df["status"] = df["status"].astype("category")
+df["amount_cents"] = pd.to_numeric(df["amount_cents"], errors="raise")
+```
+
+`errors="raise"` is usually better than silently turning bad values into `NaN`. Decide explicitly whether invalid values should fail, quarantine, or map to a known value.
+
+Duplicates:
+
+```python
+df = df.drop_duplicates(subset=["order_id"], keep="last")
+```
+
+`keep="last"` assumes the file is ordered by recency. If it is not, sort by an explicit timestamp and tie-breaker first.
+
+Joins:
+
+```python
+merged = orders.merge(
+    customers,
+    on="customer_id",
+    how="left",
+    validate="many_to_one",
+    indicator=True,
+)
+```
+
+`indicator=True` adds `_merge` with `left_only`, `right_only`, or `both`. Use it to detect missing dimensions instead of silently dropping them.
+
+Aggregation:
+
+```python
+summary = (
+    orders.groupby(["customer_id", "status"], observed=True)
+    .agg(
+        orders=("order_id", "nunique"),
+        total_cents=("amount_cents", "sum"),
+    )
+    .reset_index()
+)
+```
+
+Use `observed=True` with categorical groupers to avoid empty category combinations. Name aggregations clearly; avoid MultiIndex columns that confuse downstream consumers.
+
+### Datetimes and timezones
+
+- Parse timestamps with an explicit format when possible.
+- Decide whether to store UTC or local time; usually store UTC.
+- Keep timezone-aware timestamps until you deliberately convert.
+- Do not compare naive and aware datetimes.
+- Use `pd.Timestamp`/`datetime` rather than strings for arithmetic.
+- Record the source timezone if it differs from UTC.
+
+```python
+df["created_at"] = pd.to_datetime(df["created_at"], utc=True)
+df["created_date"] = df["created_at"].dt.date
+```
+
+### Writing
+
+CSV is for interchange and inspection. Parquet is for typed analytical storage. When writing Parquet, preserve dtypes and partition deliberately.
+
+```python
+df.to_parquet("gold/orders.parquet", index=False)
+```
+
+Avoid writing many tiny files. Aim for file sizes that match the storage and query engine; compact small files during maintenance.
+
+pandas is not a distributed system. If the data does not fit in memory, push work into SQL, process in chunks, or use a distributed engine. Do not rely on swap space as a scaling strategy.
 
 ---
 
@@ -1923,6 +1490,93 @@ and a dictionary-style aggregation. Answer:
 
 **E24.** Implement a report that joins orders and customers, filters to paid orders, groups by segment, and returns order count, unique customers, and revenue. Use `validate` or a pre-join uniqueness check. Then explain how you would test the report with three hand-checked rows.
 
+## 11.6 Incremental loads, idempotency, and upserts
+
+An incremental pipeline processes changes since a checkpoint.
+
+A watermark is the high-water mark of processed data:
+
+```sql
+SELECT *
+FROM orders
+WHERE updated_at > :last_watermark
+ORDER BY updated_at, order_id;
+```
+
+Use `>` or `>=` deliberately:
+
+- `>` avoids reprocessing the boundary row, but can miss rows with the same timestamp.
+- `>=` reprocesses the boundary, so the write must be idempotent.
+- A common compromise is `>=` with an overlap window and deduplication by key and version.
+
+Late-arriving data is the hard part. A row with an old `updated_at` can arrive after the watermark has moved past it. Options:
+
+- maintain an overlap window (reprocess the last N minutes/hours)
+- use a source sequence number instead of a timestamp
+- run periodic reconciliation
+- accept bounded lateness and document it
+
+Idempotency means running the same batch twice has the same effect as running it once. Techniques:
+
+- deterministic batch and file names
+- content hashes
+- unique keys and constraints
+- upserts keyed by primary key and source version
+- staging tables plus a single merge
+- delete-and-reinsert inside a transaction for a bounded partition
+- exactly-once consumption is not free; at-least-once delivery plus idempotent writes is usually the practical design
+
+SQLite upsert:
+
+```sql
+INSERT INTO documents (id, text, updated_at, source_version)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    text = excluded.text,
+    updated_at = excluded.updated_at,
+    source_version = excluded.source_version
+WHERE excluded.source_version >= documents.source_version;
+```
+
+The `WHERE` prevents an older record from overwriting a newer one. Choose `>` or `>=` based on whether equal versions can differ. Include a tie-breaker if the source version is not unique.
+
+Staging and merge:
+
+```text
+1. Load the batch into a staging table.
+2. Validate and deduplicate staging rows.
+3. Merge into the target in one transaction.
+4. Record the batch ID and watermark only after commit.
+```
+
+If the process crashes after the merge but before recording the watermark, the next run reprocesses the batch. The upsert must make that safe.
+
+Deletes:
+
+- A full snapshot can detect deletions by comparing keys.
+- An incremental feed may send delete events or soft-delete flags.
+- Hard deletes need tombstones or a reconciliation job.
+- Never infer deletion from absence in a partial batch.
+
+Backfills:
+
+- Replay a historical window with the current code.
+- Write to a staging location or a separate partition first.
+- Validate row counts and metrics before swapping.
+- Keep the old output until the new output is verified.
+- Make the backfill idempotent so it can be retried.
+
+Incremental aggregation is harder than incremental row loading. If an order changes from `pending` to `paid`, a naive `SUM` over only new rows is wrong. Recompute the affected aggregates from the source of truth, or maintain a changelog and apply deltas with correction logic.
+
+Schema evolution in an incremental pipeline:
+
+- Add nullable columns with defaults.
+- Read old and new schemas in the transformation layer.
+- Version the target table and migrate deliberately.
+- Do not silently coerce a changed unit (cents to dollars, seconds to milliseconds).
+
+---
+
 ## Group F — Incremental loads, idempotency, and upserts
 
 **F1.** A watermark is `2026-01-01T10:00:00Z`. Compare:
@@ -2117,6 +1771,84 @@ Then answer which failure points you would inject in tests.
 
 ---
 
+## 11.7 Orchestration, DAGs, retries, and checkpoints
+
+A pipeline is a directed acyclic graph of tasks:
+
+```text
+extract → validate → transform → load → quality_check → publish
+```
+
+Dependencies must be explicit. A cycle is a configuration bug.
+
+A minimal topological runner:
+
+```python
+from collections import defaultdict, deque
+
+def topological_order(graph: dict[str, set[str]]) -> list[str]:
+    nodes = set(graph) | {dep for deps in graph.values() for dep in deps}
+    indegree = {node: 0 for node in nodes}
+    children: dict[str, set[str]] = defaultdict(set)
+
+    for node, deps in graph.items():
+        for dep in deps:
+            indegree[node] += 1
+            children[dep].add(node)
+
+    queue = deque(sorted(node for node, degree in indegree.items() if degree == 0))
+    order = []
+
+    while queue:
+        node = queue.popleft()
+        order.append(node)
+        for child in sorted(children[node]):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                queue.append(child)
+
+    if len(order) != len(nodes):
+        raise ValueError("cycle detected")
+    return order
+```
+
+Task rules:
+
+- A task must be idempotent: rerunning it must not duplicate side effects.
+- Retry transient failures with bounded exponential backoff and jitter.
+- Do not retry validation failures, permission errors, or malformed input indefinitely.
+- Persist a checkpoint only after the task's side effect commits.
+- Record run ID, batch ID, attempt, start/end time, row counts, and error class.
+- Limit concurrency to protect the source, warehouse, and downstream services.
+- Use a lock or a unique run key to prevent overlapping runs for the same window.
+- On partial failure, rerun only the failed task and its dependents.
+
+Scheduling:
+
+- Use timezone-aware schedules; daylight-saving transitions matter.
+- Define catchup/backfill behavior explicitly.
+- Do not let a failed run silently skip its window.
+- Align windows to the source's update semantics, not just midnight.
+- Separate extract, transform, and publish so each can be retried independently.
+
+Frameworks such as Airflow, Prefect, and Dagster add scheduling, retries, backfills, metadata, and UI. The concepts are the same; a framework does not make a non-idempotent task safe.
+
+Backpressure:
+
+- Bound the number of in-flight records and concurrent requests.
+- Apply rate limits when reading from APIs.
+- Write in batches, not one row per transaction.
+- Handle a slow consumer without unbounded memory growth.
+
+Dead letters:
+
+- Quarantine records that cannot be processed.
+- Include the error class, row payload, batch ID, and timestamp.
+- Provide a replay path after the bug is fixed.
+- Do not let a single malformed row block an entire batch unless the contract requires it.
+
+---
+
 ## Group G — Orchestration, DAGs, retries, and checkpoints
 
 **G1.** Define a DAG for a pipeline with extract, validate, transform, load, quality check, and publish. Answer:
@@ -2283,6 +2015,74 @@ Then explain how you would test a diamond-shaped graph.
 
 ---
 
+## 11.8 Data quality and contracts
+
+Data quality checks are executable expectations:
+
+- schema: required columns, types, nullability
+- uniqueness: primary keys and deduplication keys
+- completeness: null rate, required fields
+- validity: ranges, enums, formats
+- consistency: cross-field rules, units, timezone
+- referential integrity: foreign keys
+- freshness: maximum age of the newest record
+- volume: row-count bounds compared with history
+- distribution: category proportions or numeric ranges
+
+Classify severity:
+
+- **error:** block publication; data is not trustworthy.
+- **warn:** publish with a visible warning and investigate.
+- **info:** record for trend analysis.
+
+A simple expectation framework:
+
+```python
+from dataclasses import dataclass
+from typing import Callable, Literal
+import pandas as pd
+
+@dataclass(frozen=True)
+class Expectation:
+    name: str
+    severity: Literal["error", "warn", "info"]
+    check: Callable[[pd.DataFrame], bool]
+```
+
+Checks should return evidence, not only a boolean:
+
+```python
+def no_duplicate_order_ids(df: pd.DataFrame) -> tuple[bool, dict]:
+    duplicated = df["order_id"].duplicated(keep=False)
+    sample = df.loc[duplicated, "order_id"].head(10).tolist()
+    return not duplicated.any(), {"count": int(duplicated.sum()), "sample": sample}
+```
+
+Quarantine instead of silently dropping bad rows. A quarantine record should include the raw payload, the failed expectation, the batch ID, and enough context to reproduce the failure. Quarantined data needs an owner and a replay process.
+
+Schema drift:
+
+- New columns may be additive or unexpected.
+- Missing columns are usually breaking.
+- Changed types are breaking.
+- Changed nullability can break consumers.
+- Changed units or timezones are semantic breaks.
+
+Fail the contract when a breaking change appears. Do not let a pipeline infer a new schema and continue silently.
+
+Data quality metrics should be monitored over time:
+
+- null rate by column
+- duplicate rate by key
+- row count versus the same weekday last week
+- freshness lag
+- rejected/quarantined rows
+- distribution shift by category
+
+A quality check that never fails is not necessarily healthy; it may be too weak or never running.
+
+---
+
 ## Group H — Data quality and contracts
 
 **H1.** Define a data contract for an orders dataset. Include schema, key, freshness, volume, and ownership. Answer:
@@ -2433,6 +2233,159 @@ Then explain how you would test a diamond-shaped graph.
 2. What should it be if one error fails?
 3. How do you make the report machine-readable?
 4. How do you link it to the batch and run ID?
+
+---
+
+## 11.9 Testing pipelines
+
+Test the pure transformation first:
+
+```python
+def normalize_status(value: str) -> str:
+    mapping = {"paid": "paid", "PAID": "paid", "pending": "pending"}
+    if value not in mapping:
+        raise ValueError(f"unknown status: {value!r}")
+    return mapping[value]
+```
+
+Unit tests should use small, hand-checked fixtures. Include:
+
+- empty input
+- all-null column
+- duplicate keys
+- boundary timestamps
+- unexpected enum values
+- Unicode and whitespace
+- large/small batch boundaries
+- idempotent rerun
+
+For SQL, use a temporary SQLite database:
+
+```python
+import sqlite3
+
+def make_db() -> sqlite3.Connection:
+    con = sqlite3.connect(":memory:")
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys = ON")
+    con.executescript("""
+        CREATE TABLE orders (
+            order_id TEXT PRIMARY KEY,
+            customer_id TEXT NOT NULL,
+            amount_cents INTEGER NOT NULL
+        );
+    """)
+    return con
+```
+
+Test the pipeline end to end on temporary files and a temporary database. Assert:
+
+- output schema and dtypes
+- row count and key uniqueness
+- expected values for a few hand-checked rows
+- idempotency after running twice
+- incremental behavior with late data
+- quarantine behavior for invalid rows
+- failure rollback
+
+Failure injection:
+
+- make the loader raise after the first batch
+- close the database during a write
+- provide a malformed file
+- simulate a stale checkpoint
+- run two workers on the same window
+
+Golden files are useful for stable serialized output, but normalize volatile fields (timestamps, random IDs, file paths) before comparing. Otherwise the tests fail for irrelevant reasons.
+
+Property-based tests are useful for parsers and invariants: round-trip serialization, chunk boundaries, deduplication, and ordering.
+
+Determinism:
+
+- inject a clock instead of calling `datetime.now()` directly
+- inject an ID generator instead of using random UUIDs
+- sort outputs where order is not semantically meaningful
+- seed any randomness
+- pin library versions
+
+Do not use production data in tests. Use synthetic fixtures or a privacy-safe sample.
+
+---
+
+## 11.10 Observability, lineage, privacy, and cost
+
+A pipeline needs to answer:
+
+- Did it run?
+- How long did it take?
+- How many rows were read, written, rejected?
+- How fresh is the output?
+- Which source and code version produced it?
+- Who consumes it?
+- Did quality or cost change?
+
+Logs should be structured:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+logger.info(
+    "batch_complete",
+    extra={
+        "batch_id": batch_id,
+        "source": source,
+        "rows_in": rows_in,
+        "rows_out": rows_out,
+        "rows_quarantined": rows_quarantined,
+        "duration_ms": duration_ms,
+    },
+)
+```
+
+Metrics:
+
+- rows processed and rejected
+- freshness lag
+- task duration and retries
+- checkpoint position
+- bytes read/written
+- cost per run or per tenant
+- quality expectation failures
+
+Lineage:
+
+- source dataset and version
+- transformation code version
+- prompt/model version if applicable
+- output dataset and partition
+- downstream consumers
+- schema version
+
+Lineage makes it possible to answer “which outputs are affected by this bad input?” without guessing.
+
+Privacy:
+
+- minimize PII at ingestion
+- hash or tokenize identifiers when raw values are not needed
+- restrict access to raw layers
+- set retention and deletion policies
+- avoid logging raw payloads
+- test that deleted records do not reappear after a replay
+- separate tenant data physically or logically
+
+Cost:
+
+- partition by common filters
+- compress columnar files
+- avoid tiny files
+- prune old partitions
+- push filters into SQL
+- avoid repeatedly scanning the same large table
+- cache or materialize expensive intermediate results
+- measure bytes scanned, not just rows
+
+A pipeline that is correct but scans ten times more data than necessary is still a production problem.
 
 ---
 
@@ -2597,6 +2550,53 @@ Then explain how you would test a diamond-shaped graph.
 4. How do you preserve partitioning?
 
 **I24.** Implement a pipeline observability record containing run ID, batch ID, row counts, freshness, quarantine count, duration, and lineage. Then answer how you would emit it without logging raw records.
+
+---
+
+## 11.11 Common mistakes and conventions
+
+Mistakes to avoid:
+
+1. Reading IDs as numbers and losing leading zeros.
+2. Letting pandas infer dtypes for critical columns.
+3. Comparing naive and timezone-aware datetimes.
+4. Using floats for money.
+5. Treating CSV as a typed format.
+6. Writing output directly to the final path.
+7. Assuming a file write is atomic across filesystems.
+8. Retrying a non-idempotent task.
+9. Recording a checkpoint before the write commits.
+10. Using `>` watermarks without handling equal timestamps or late data.
+11. Joining on a non-unique key and silently multiplying rows.
+12. Using `NOT IN` with NULLs.
+13. Building SQL with f-strings.
+14. Fetching a whole table into pandas just to filter it.
+15. Using `iterrows` for large transforms.
+16. Dropping invalid rows without quarantine or metrics.
+17. Inferring deletion from absence in a partial batch.
+18. Letting schema drift pass silently.
+19. Holding a transaction open during a network call.
+20. Running overlapping jobs for the same window.
+21. Backfilling directly into production without validation.
+22. Writing many tiny files.
+23. Logging raw PII or secrets.
+24. Testing only the happy path.
+25. Treating a successful job as proof that the data is correct.
+
+Conventions:
+
+- Land raw data immutably; validate before transforming.
+- Declare schemas and contracts explicitly.
+- Use stable keys, deterministic batch IDs, and idempotent writes.
+- Use transactions for multi-statement changes.
+- Check join cardinality before merging.
+- Record watermarks only after successful commits.
+- Quarantine bad records with enough context to replay.
+- Test empty, duplicate, late, and malformed inputs.
+- Emit row counts, freshness, quality, and lineage for every run.
+- Keep PII out of logs and minimize it in storage.
+- Partition and compress for the queries you actually run.
+- Prefer the simplest pipeline that meets the freshness and volume requirements.
 
 ---
 
@@ -2766,4 +2766,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Emit row counts, freshness, quality, lineage, and cost without logging PII.
 - Explain the contract, API response, and runbook to a TypeScript client.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 12.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 12](../chapter-12/deployment-observability.md).

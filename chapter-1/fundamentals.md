@@ -2167,4 +2167,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Diagnose `UnboundLocalError`, mutable-default bugs, `None`-returning method bugs, and the `[[0]] * n` trap on sight.
 - Translate a familiar TypeScript function into idiomatic Python using truthiness, f-strings, `enumerate`, and `dict.get`.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 2.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 2](../chapter-2/functions-objects.md).

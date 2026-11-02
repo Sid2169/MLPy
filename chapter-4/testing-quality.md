@@ -110,6 +110,95 @@ def test_float_sum():
 - Assert one behavior per test. When the third of six assertions fails, the reader must figure out which behavior broke; several small tests report precisely.
 - Prefer equality on whole structures (`assert result == expected`) over field-by-field checks: it fails with a readable diff and catches unexpected extra fields.
 
+# Exercises
+
+Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
+
+## Group A — pytest basics and assertions
+
+**A1.** Given this tree, state which files pytest collects and why each of the others is ignored:
+
+```text
+tests/
+├── test_utils.py
+├── utils_test.py
+├── utils.py
+├── tests_helpers.py
+└── test_utils.py.bak
+```
+
+**A2.** Which of these definitions are collected as tests, and why not for the others?
+
+```python
+def test_ok(): ...
+def test_(): ...
+def check_ok(): ...
+
+class TestThing:
+    def test_method(self): ...
+    def helper(self): ...
+
+class ThingTests:
+    def test_x(self): ...
+```
+
+**A3.** For each assertion, predict pass or fail and the reason: `assert [1, 2] == [1, 2]`, `assert [1, 2] is [1, 2]`, `assert 1 == True`, `assert "1" == 1`, `assert (1, 2) == (1, 2)`.
+
+**A4.** Predict exactly which assertion fails and what values pytest reports:
+
+```python
+def test_merge():
+    result = {"a": 1}
+    assert result["a"] == 2
+    assert result["b"] == 1
+```
+
+**A5.** Rewrite this unittest-style test as idiomatic pytest:
+
+```python
+import unittest
+
+class TestCalc(unittest.TestCase):
+    def test_add(self):
+        self.assertEqual(add(1, 2), 3)
+```
+
+**A6.** Write pytest tests for a `word_counts(text)` function that returns `{word: count}`. Cover a normal sentence, an empty string, and a string with extra whitespace.
+
+**A7.** Predict pass or fail for each, and explain the surprising one:
+
+```python
+assert 0.1 + 0.2 == pytest.approx(0.3)
+assert 0.1 + 0.2 == 0.3
+assert 1 / 3 == pytest.approx(0.333)
+```
+
+**A8.** Write a test for `circle_area(radius)` using `pytest.approx` with an explicit `rel` tolerance, covering a small radius and a large one.
+
+**A9.** Fix every weak or wrong assertion and explain each fix: `assert result == None`, `assert ok == True`, `assert len(items) > 0`, `assert items`.
+
+**A10.** Given tests named `test_parse_ok`, `test_parse_slow`, `test_slow_mode`, `test_parser_ok`, and `test_other`, state which run under `pytest -k "parse and not slow"`.
+
+**A11.** Explain what exit code `5` means and why a CI pipeline should treat it as a failure rather than a pass.
+
+**A12.** With five tests where the second fails, describe the difference between running `pytest` and `pytest -x`.
+
+**A13.** Write two tests for `divide(a, b)`: one for a normal result using `approx`, and one asserting that division flips the sign with a negative divisor.
+
+**A14.** Write a `TestParseBool` class with two test methods, and state the naming rules a test class must satisfy (including what must not be defined).
+
+**A15.** Write a test for `merge_defaults(defaults, overrides)` from Chapter 2 that asserts the returned value and that neither input dict was mutated.
+
+**A16.** Explain why plain `assert` produces useful failure messages in pytest without importing any assertion library.
+
+**A17.** This test passes but proves almost nothing. Rewrite it into at least three precise assertions:
+
+```python
+def test_parse_settings():
+    result = parse_settings("host=x;port=8080;debug=true")
+    assert result
+```
+
 ## 4.3 Fixtures
 
 A fixture supplies a test's dependencies: prepared data, a configured object, a temporary directory, a fake client. Fixtures replace `setUp`/`tearDown` and are shared through `conftest.py`.
@@ -190,6 +279,96 @@ def make_user():
 
 Do not share mutable state through module-level globals; the "fixture that returns a fresh object" pattern is the fix for order-dependent tests.
 
+## Group B — Fixtures
+
+**B1.** Add a fixture returning a fresh list. Then write two tests that each append an item and assert the list length is 1. Explain why the second test does not see the first test's item.
+
+**B2.** Write a `settings` fixture returning a dict, plus two tests that mutate it, demonstrating that each test receives an independent object.
+
+**B3.** Predict the exact printed order under `pytest -s`, including what happens if the test fails:
+
+```python
+@pytest.fixture
+def resource():
+    print("setup")
+    yield "r"
+    print("teardown")
+
+def test_a(resource):
+    print("test a", resource)
+```
+
+**B4.** Given this layout, state which conftest fixtures are visible from `tests/unit/test_x.py` and from `tests/it/test_y.py`:
+
+```text
+tests/
+├── conftest.py
+├── unit/
+│   ├── conftest.py
+│   └── test_x.py
+└── it/
+    └── test_y.py
+```
+
+**B5.** Write two fixtures where `client` depends on `settings`, and a test that requests only `client` while still receiving the settings-provided values.
+
+**B6.** Predict the values observed by each test with a `scope="module"` fixture, and state when the state resets:
+
+```python
+@pytest.fixture(scope="module")
+def state():
+    return {"n": 0}
+
+def test_first(state):
+    state["n"] += 1
+    assert state["n"] == 1
+
+def test_second(state):
+    state["n"] += 1
+    assert state["n"] == ??
+```
+
+**B7.** Write a fixture that creates a JSON file inside `tmp_path` and returns its path. Then write a test that loads it and checks a nested value.
+
+**B8.** Write a factory fixture `make_user` with defaults `name="default"` and `active=True` that appends each created user to a list, and a test that creates two differently-configured users and asserts both.
+
+**B9.** Predict whether an `autouse=True` fixture runs for a test that does not request it. State one legitimate use and one reason to avoid autouse.
+
+**B10.** These tests pass alone but fail together. Explain why, and fix the design with a fixture:
+
+```python
+CACHE = {}
+
+def test_add_to_cache():
+    CACHE["a"] = 1
+    assert CACHE["a"] == 1
+
+def test_cache_starts_empty():
+    assert CACHE == {}
+```
+
+**B11.** A fixture is defined in `tests/test_a.py` and requested by a test in `tests/test_b.py`, producing `fixture 'client' not found`. Explain why and give the two standard fixes.
+
+**B12.** Write a fixture returning an environment mapping suitable for Chapter 3's `load_settings`, including `API_KEY` and `TIMEOUT`. Use it in a test asserting the parsed `Settings` values.
+
+**B13.** Fixture `a` depends on fixture `b`. Predict the exact order of setup, test body, and teardown lines for both fixtures plus the test.
+
+**B14.** Write two fixtures: a session-scoped `api_client` that is expensive to construct but read-only, and a function-scoped `fresh_state` for per-test data. Explain the scope choice for each.
+
+**B15.** A test suite shares one client fixture with `scope="session"` that accumulates calls in a list. One test asserts the call count is zero and fails after another test runs. Diagnose and fix.
+
+**B16.** A test function takes a parameter named `setting` while the fixture is named `settings`. Predict the error message pytest reports and the one-word fix.
+
+**B17.** Write a `conftest.py` fixture `data_dir` that creates `raw/` and `processed/` inside `tmp_path` and returns the base path.
+
+**B18.** Write a test using `caplog` asserting that a function logs the request URL at INFO and never logs the word `token` or the secret value.
+
+**B19.** Write a test using `capsys` asserting that `main(["--limit", "0"])` prints a summary line containing `wrote 0 records`.
+
+**B20.** Write a fixture that yields a fake HTTP client recording requested paths, and two tests that use it: one asserting the recorded paths, one asserting the returned data.
+
+**B21.** Explain the difference between a fixture that returns a value and one that yields, and when teardown code is mandatory.
+
 ## 4.4 Parametrized tests
 
 `@pytest.mark.parametrize` runs one test function many times, once per input row, with each case reported separately. This replaces loops and copy-pasted tests.
@@ -233,6 +412,63 @@ def test_parse_bool(value, expected):
 - Choose cases that represent boundaries and equivalence classes, not every possible value: empty, single element, typical, boundary, invalid, duplicate, unicode, `None` where allowed.
 - Never write `for` loops or conditionals inside a test body to cover cases; parametrize instead so each failure is independently reported and independently re-runnable.
 
+## Group C — Parametrized tests
+
+**C1.** How many test cases does each run: a single `parametrize` with 3 rows; two stacked decorators with 3 and 2 rows; a single decorator with 4 rows and `ids` provided?
+
+**C2.** Write parametrized tests for `parse_bool` with at least five cases and readable ids, including an invalid value that maps to `False`.
+
+**C3.** Convert this loop-based test into a parametrized one:
+
+```python
+def test_split():
+    for text, expected in [("a b", ["a", "b"]), ("  ", []), ("a  b", ["a", "b"])]:
+        assert text.split() == expected
+```
+
+**C4.** Rewrite this decorator using the tuple-of-names form and explain the difference in readability:
+
+```python
+@pytest.mark.parametrize("a,b,expected", [(1, 2, 3), (0, 0, 0)])
+def test_add(a, b, expected):
+    assert add(a, b) == expected
+```
+
+**C5.** Add `ids=["empty", "single", "unicode"]` to a parametrized test and state how the test IDs change.
+
+**C6.** Mark one row of a parametrized test as expected-to-fail with `pytest.param(..., marks=pytest.mark.xfail)`. Predict how pytest reports that row versus the others.
+
+**C7.** A failure is reported as `test_divide[3-5]` for `@pytest.mark.parametrize("a,b", ...)`. State which values were used in the failing case and how the id was formed.
+
+**C8.** Write the full parametrize table for `chunk(items, size)` covering: exact multiple, remainder, `size` larger than the input, and `size=1`. Include the expected output for each.
+
+**C9.** Write a parametrized test that expects exceptions, with rows shaped `(value, exception_type)`, using `pytest.raises(exc)` inside the test body.
+
+**C10.** Write a test with two stacked `parametrize` decorators of sizes 2 and 3. State the total number of cases and describe the id format.
+
+**C11.** Write parametrized cases for `normalize_text` including `None` handling if the function supports it, empty string, and whitespace-only input. If the function does not support `None`, write the case as expected-to-raise instead.
+
+**C12.** Write a parametrized round-trip test `save_json`/`load_json` over `tmp_path` using cases: a nested dict, an empty dict, and a dict with unicode text. Signature: `def test_round_trip(tmp_path, data)`.
+
+**C13.** State the difference between these two decorators and when each is clearer:
+
+```python
+@pytest.mark.parametrize("a,b", [(1, 2), (3, 4)])
+@pytest.mark.parametrize(("a", "b"), [(1, 2), (3, 4)])
+```
+
+**C14.** Write a parametrized test for `word_counts` that asserts the full output dict for inputs containing repeated words, punctuation-adjacent words, and mixed case (define the function's normalization from Chapter 1 if needed).
+
+**C15.** Write a parametrized test for an `average(xs)` function using `pytest.approx` for two cases with repeating decimals and one exact case.
+
+**C16.** This table has redundant rows that test the same behavior twice. Identify them and replace them with genuinely distinct boundary cases:
+
+```python
+@pytest.mark.parametrize("n,expected", [(2, 4), (3, 9), (4, 16), (5, 25), (6, 36)])
+def test_square(n, expected):
+    assert n * n == expected
+```
+
 ## 4.5 Testing exceptions and edge cases
 
 `pytest.raises` asserts that an exception is raised, and gives access to the exception object.
@@ -259,6 +495,55 @@ Details:
 - To assert that something succeeds, call it normally; a returned value is the implicit success assertion. (`pytest.raises(Exception)` as a "no exception" guard is wrong: any other exception also passes.)
 - Edge-case checklist per function: empty inputs, single element, exact boundaries (0, 1, max), duplicates, whitespace/unicode, `None` where allowed, invalid types, and very large or very small numeric values.
 - Test recurrence properties where possible: idempotence (`load(load(x)) == load(x)`), round trips (`load(dump(x)) == x`), and "does not mutate its input".
+
+## Group D — Testing exceptions and edge cases
+
+**D1.** Write a test asserting `parse_count("abc")` raises `ValueError` whose message contains `invalid count`.
+
+**D2.** Predict pass or fail and explain:
+
+```python
+with pytest.raises(ValueError, match="invalid"):
+    raise ValueError("Invalid input")
+```
+
+**D3.** Given an `ApiError` with a `status_code` attribute, write a test using `pytest.raises(...) as exc_info` that asserts both the type and the status code.
+
+**D4.** Write a test that would catch a function accidentally raising on valid input, and explain why wrapping the call in `pytest.raises(Exception)` is wrong as a success check.
+
+**D5.** `classify(429)` raises `RateLimitError`, a subclass of `ProviderError`. Predict whether `pytest.raises(ProviderError)` passes or fails, and whether that is desirable.
+
+**D6.** `parse_pair("k=")` returns `(None, None)` instead of raising (Chapter 2). Write the tests that pin this contract for both the missing-`=` case and a valid case.
+
+**D7.** Write an edge-case table for `first_negative(xs)`: empty list returns `None`, single negative, single positive, all negative, and mixed with the negative last.
+
+**D8.** Predict what `assert float("nan") == float("nan")` does in a test, then write the correct assertion using `math.isnan`.
+
+**D9.** Write a test that invalid JSON raises `json.JSONDecodeError`, deliberately without `match`, and explain why the message is a poor assertion target here.
+
+**D10.** Parametrize tests for a `Port` class (Chapter 2): valid values `1` and `65535`; invalid values `0`, `65536`, and `-1` raising `ValueError`.
+
+**D11.** Explain when to assert only the exception type, when to add a message fragment, and when asserting the full message is a mistake.
+
+**D12.** Write a test proving `add_tag(tags, tag)` does not mutate the input list, plus a test for its return value.
+
+**D13.** Write an idempotence test showing `load_config(raw)` produces equal results when called twice on the same input.
+
+**D14.** Write a test showing `safe_int("x", default=7)` returns `7` and does not raise.
+
+**D15.** This test asserts internal calls instead of behavior. Rewrite it to assert the observable result, and explain the maintenance benefit:
+
+```python
+def test_fetch_user(mocker):
+    repo = Mock()
+    service = UserService(repo)
+    service.fetch_user(1)
+    repo.find.assert_called_once_with(1)
+```
+
+**D16.** Write a test asserting that an error message includes the offending value `3` in a way that still works when the message gains surrounding text. Use a string-matching assertion with proper escaping, or a substring check on `str(exc_info.value)`.
+
+**D17.** A function must reject an empty `name` with a message naming the field. Write both the positive and negative tests, ensuring the negative one cannot pass when a different error is raised.
 
 ## 4.6 Temporary files and test isolation
 
@@ -289,6 +574,44 @@ Rules:
 - Isolation is observable: every test should pass when run alone (`pytest tests/test_x.py::test_y`) and in any order (`pytest -p no:randomly` if a plugin shuffles). Order-dependent tests are bugs in the tests.
 - Deterministic output matters: sort collections before asserting (Chapter 3), freeze timestamps with injected clocks, and seed random generators.
 - For CLI code, call `main(["--input", str(tmp_path / "in.csv"), ...])` and assert the exit code and the written files. This exercises real file paths without spawning subprocesses.
+
+## Group E — Temporary files and test isolation
+
+**E1.** Write a test that writes text to a file under `tmp_path` and reads it back, asserting round-trip equality with UTF-8 content.
+
+**E2.** Predict whether two tests can share the same `tmp_path` directory or see each other's files.
+
+**E3.** Rewrite this test so it does not use the repository's working directory, and explain what breaks in CI with the original:
+
+```python
+def test_generate_report():
+    generate_report("report.json")
+    assert Path("report.json").exists()
+```
+
+**E4.** Write a test for `count_lines(path)` creating a three-line file inside `tmp_path`.
+
+**E5.** Write a test for `save_json`/`load_json` that asserts the round trip, verifies the file ends with a newline, and uses a nested structure with a `"café"` string.
+
+**E6.** Test A writes `test_output.txt` next to the test file; test B reads it. Describe two ways this suite fails depending on how it is run.
+
+**E7.** A test relies on the current working directory to find `data/in.json`. Fix the test using `monkeypatch.chdir(tmp_path)` plus a file created in `tmp_path`, and explain why the original approach was order-dependent.
+
+**E8.** Write a CSV file inside `tmp_path` using `newline=""` and read it with `csv.DictReader`; assert the full list of dicts including that values are strings.
+
+**E9.** Write a session-scoped fixture using `tmp_path_factory` that creates a read-only corpus directory, plus a function-scoped test that copies one file from it before mutating.
+
+**E10.** Two tests both create `tmp_path / "data.json"` with different contents. Predict whether they can interfere, and explain the mechanism.
+
+**E11.** Write an end-to-end CLI test: create an input CSV in `tmp_path`, call `main(["--input", str(inp), "--output", str(out), "--limit", "2"])`, assert the exit code is `0`, and assert the output JSON contains exactly two records.
+
+**E12.** Explain why you should not delete `tmp_path` manually at the end of a test.
+
+**E13.** Write a test asserting that two runs of `save_json` on the same data produce byte-identical files (deterministic formatting), and name the two formatting decisions that make this true.
+
+**E14.** Write a test proving a function writes only under the output directory you pass: create a sentinel directory inside `tmp_path`, run the function with its output path inside a different subdirectory, and assert the sentinel directory is still empty while the expected file exists.
+
+**E15.** Explain the difference between `tmp_path` and `tmp_path_factory`, and state the scope of each.
 
 ## 4.7 Mocking and isolating dependencies
 
@@ -400,440 +723,6 @@ def test_transport_failure():
 
 This is the preferred way to test any code using `httpx` (Chapter 3) and the async client in Chapter 6: no `patch`, no network, full control over statuses, bodies, and raised transport errors.
 
-## 4.8 Unit tests versus integration tests
-
-- A **unit test** exercises one unit of logic with all dependencies faked or passed in. It is fast, deterministic, and has no external resources.
-- An **integration test** exercises real wiring: a real file on disk, the actual client against a mock transport, a database, or a live API. It is slower and may be flaky or require credentials.
-
-Practices:
-
-- Keep the fast suite default: `pytest` runs everything marked as unit plus local integration.
-- Separate tests that need the network or credentials with markers:
-
-```python
-@pytest.mark.integration
-def test_live_api_round_trip():
-    ...
-```
-
-```bash
-pytest -m "not integration"     # fast, hermetic suite for every commit
-pytest -m integration           # before release / nightly, with real credentials
-```
-
-- Skip when prerequisites are absent, naming the missing piece:
-
-```python
-@pytest.mark.skipif(not os.getenv("API_KEY"), reason="API_KEY not set")
-def test_live_api():
-    ...
-```
-
-- Tests against `httpx.MockTransport` are unit tests in spirit: they exercise the real code path without network variance. Reserve "integration" for things your process cannot fully control.
-- A test needing `time.sleep`, retries against a real endpoint, or shared mutable state is a maintenance liability; rewrite toward injection and fakes.
-- Smoke tests are integration tests too: run the CLI with `--help` or on a tiny sample and assert exit code `0`.
-
-CI ordering: format check, lint, type check, unit tests, then (optionally) integration tests. Fail fast on the cheap checks.
-
-## 4.9 Formatting, linting, and static type checking
-
-Three distinct tools with three distinct jobs:
-
-- **Formatter**: rewrites code to a canonical style. No judgment, no warnings. `ruff format` (compatible with `black`).
-- **Linter**: flags probable bugs and style problems; can auto-fix some. `ruff check`.
-- **Type checker**: verifies type hints without running code. `mypy` or `pyright`.
-
-```bash
-ruff format .                     # rewrite files
-ruff format --check .             # exit 1 if files would change (CI)
-ruff check .                      # report issues
-ruff check --fix .                # apply safe fixes
-mypy src                          # type-check the package
-```
-
-Configuration in `pyproject.toml`:
-
-```toml
-[tool.ruff]
-line-length = 100
-
-[tool.ruff.lint]
-select = ["E", "F", "I"]          # pycodestyle errors, pyflakes, import sorting
-
-[tool.mypy]
-python_version = "3.11"
-disallow_untyped_defs = true
-warn_return_any = true
-no_implicit_optional = true
-```
-
-What the type checker catches that tests often miss:
-
-- Returning a value of the wrong type (`Incompatible return value type`).
-- Using a value that may be `None`: `str | None` must be narrowed with `if x is None` before use.
-- Mixing types in containers: `list[int]` receiving `list[str]`.
-- Keyword typos in calls to typed functions (`unexpected keyword argument`), which untyped code only discovers at runtime.
-
-Practical guidance:
-
-- Type-check `src`, not `tests` (or relax test checking with a per-module override); test files are allowed to be untyped.
-- Add `# type: ignore` only with a reason and a narrow scope; unexplained ignores accumulate as debt. Prefer fixing the annotation or the code.
-- Keep `Any` rare; it disables checking for that value.
-- Start gradual: annotate public functions and dataclasses first (Chapters 2 and 5); add strictness flags as the codebase complies.
-- Run all three tools in pre-commit or CI so the repository state is always consistent and mergeable.
-
-## 4.10 Common mistakes and conventions
-
-Mistakes to avoid:
-
-1. Asserting truthiness (`assert result`) when the exact value matters.
-2. Sharing mutable state through module globals or class attributes; tests then pass only in a specific order.
-3. Loop-based pseudo-parametrization inside a test.
-4. Testing internal call sequences instead of observable behavior.
-5. Patching where a name is defined rather than where it is looked up.
-6. Mocks returning `Mock` objects and silently satisfying loose assertions.
-7. Hitting real networks or sleeping in tests.
-8. Depending on the working directory or writing into the repository.
-9. Catching `Exception` in tests with `pytest.raises(Exception)`, turning "no test" into "passed".
-10. Over-specifying exception messages with unescaped regex metacharacters in `match`.
-11. Leaving debug `print` calls and disabled tests (`@pytest.mark.skip`) forever.
-12. Letting format, lint, or type-check failures live in CI as "known issues".
-
-Conventions to adopt:
-
-- Test names describe behavior: `test_missing_api_key_raises_config_error`.
-- One behavior per test; a test with six asserts usually wants to be six tests or a parametrized one.
-- Arrange-act-assert structure, visually separated.
-- Fixtures for setup; parametrize for data; fakes or `MockTransport` for boundaries.
-- `tmp_path` for files, `monkeypatch` for environment, `caplog`/`capsys` for outputs.
-- Run `pytest -q` constantly; before committing run `ruff format .`, `ruff check .`, `mypy src`, `pytest`.
-- Add a regression test with every bug fix: reproduce the failure first, then fix.
-
----
-
-# Exercises
-
-Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
-
-## Group A — pytest basics and assertions
-
-**A1.** Given this tree, state which files pytest collects and why each of the others is ignored:
-
-```text
-tests/
-├── test_utils.py
-├── utils_test.py
-├── utils.py
-├── tests_helpers.py
-└── test_utils.py.bak
-```
-
-**A2.** Which of these definitions are collected as tests, and why not for the others?
-
-```python
-def test_ok(): ...
-def test_(): ...
-def check_ok(): ...
-
-class TestThing:
-    def test_method(self): ...
-    def helper(self): ...
-
-class ThingTests:
-    def test_x(self): ...
-```
-
-**A3.** For each assertion, predict pass or fail and the reason: `assert [1, 2] == [1, 2]`, `assert [1, 2] is [1, 2]`, `assert 1 == True`, `assert "1" == 1`, `assert (1, 2) == (1, 2)`.
-
-**A4.** Predict exactly which assertion fails and what values pytest reports:
-
-```python
-def test_merge():
-    result = {"a": 1}
-    assert result["a"] == 2
-    assert result["b"] == 1
-```
-
-**A5.** Rewrite this unittest-style test as idiomatic pytest:
-
-```python
-import unittest
-
-class TestCalc(unittest.TestCase):
-    def test_add(self):
-        self.assertEqual(add(1, 2), 3)
-```
-
-**A6.** Write pytest tests for a `word_counts(text)` function that returns `{word: count}`. Cover a normal sentence, an empty string, and a string with extra whitespace.
-
-**A7.** Predict pass or fail for each, and explain the surprising one:
-
-```python
-assert 0.1 + 0.2 == pytest.approx(0.3)
-assert 0.1 + 0.2 == 0.3
-assert 1 / 3 == pytest.approx(0.333)
-```
-
-**A8.** Write a test for `circle_area(radius)` using `pytest.approx` with an explicit `rel` tolerance, covering a small radius and a large one.
-
-**A9.** Fix every weak or wrong assertion and explain each fix: `assert result == None`, `assert ok == True`, `assert len(items) > 0`, `assert items`.
-
-**A10.** Given tests named `test_parse_ok`, `test_parse_slow`, `test_slow_mode`, `test_parser_ok`, and `test_other`, state which run under `pytest -k "parse and not slow"`.
-
-**A11.** Explain what exit code `5` means and why a CI pipeline should treat it as a failure rather than a pass.
-
-**A12.** With five tests where the second fails, describe the difference between running `pytest` and `pytest -x`.
-
-**A13.** Write two tests for `divide(a, b)`: one for a normal result using `approx`, and one asserting that division flips the sign with a negative divisor.
-
-**A14.** Write a `TestParseBool` class with two test methods, and state the naming rules a test class must satisfy (including what must not be defined).
-
-**A15.** Write a test for `merge_defaults(defaults, overrides)` from Chapter 2 that asserts the returned value and that neither input dict was mutated.
-
-**A16.** Explain why plain `assert` produces useful failure messages in pytest without importing any assertion library.
-
-**A17.** This test passes but proves almost nothing. Rewrite it into at least three precise assertions:
-
-```python
-def test_parse_settings():
-    result = parse_settings("host=x;port=8080;debug=true")
-    assert result
-```
-
-## Group B — Fixtures
-
-**B1.** Add a fixture returning a fresh list. Then write two tests that each append an item and assert the list length is 1. Explain why the second test does not see the first test's item.
-
-**B2.** Write a `settings` fixture returning a dict, plus two tests that mutate it, demonstrating that each test receives an independent object.
-
-**B3.** Predict the exact printed order under `pytest -s`, including what happens if the test fails:
-
-```python
-@pytest.fixture
-def resource():
-    print("setup")
-    yield "r"
-    print("teardown")
-
-def test_a(resource):
-    print("test a", resource)
-```
-
-**B4.** Given this layout, state which conftest fixtures are visible from `tests/unit/test_x.py` and from `tests/it/test_y.py`:
-
-```text
-tests/
-├── conftest.py
-├── unit/
-│   ├── conftest.py
-│   └── test_x.py
-└── it/
-    └── test_y.py
-```
-
-**B5.** Write two fixtures where `client` depends on `settings`, and a test that requests only `client` while still receiving the settings-provided values.
-
-**B6.** Predict the values observed by each test with a `scope="module"` fixture, and state when the state resets:
-
-```python
-@pytest.fixture(scope="module")
-def state():
-    return {"n": 0}
-
-def test_first(state):
-    state["n"] += 1
-    assert state["n"] == 1
-
-def test_second(state):
-    state["n"] += 1
-    assert state["n"] == ??
-```
-
-**B7.** Write a fixture that creates a JSON file inside `tmp_path` and returns its path. Then write a test that loads it and checks a nested value.
-
-**B8.** Write a factory fixture `make_user` with defaults `name="default"` and `active=True` that appends each created user to a list, and a test that creates two differently-configured users and asserts both.
-
-**B9.** Predict whether an `autouse=True` fixture runs for a test that does not request it. State one legitimate use and one reason to avoid autouse.
-
-**B10.** These tests pass alone but fail together. Explain why, and fix the design with a fixture:
-
-```python
-CACHE = {}
-
-def test_add_to_cache():
-    CACHE["a"] = 1
-    assert CACHE["a"] == 1
-
-def test_cache_starts_empty():
-    assert CACHE == {}
-```
-
-**B11.** A fixture is defined in `tests/test_a.py` and requested by a test in `tests/test_b.py`, producing `fixture 'client' not found`. Explain why and give the two standard fixes.
-
-**B12.** Write a fixture returning an environment mapping suitable for Chapter 3's `load_settings`, including `API_KEY` and `TIMEOUT`. Use it in a test asserting the parsed `Settings` values.
-
-**B13.** Fixture `a` depends on fixture `b`. Predict the exact order of setup, test body, and teardown lines for both fixtures plus the test.
-
-**B14.** Write two fixtures: a session-scoped `api_client` that is expensive to construct but read-only, and a function-scoped `fresh_state` for per-test data. Explain the scope choice for each.
-
-**B15.** A test suite shares one client fixture with `scope="session"` that accumulates calls in a list. One test asserts the call count is zero and fails after another test runs. Diagnose and fix.
-
-**B16.** A test function takes a parameter named `setting` while the fixture is named `settings`. Predict the error message pytest reports and the one-word fix.
-
-**B17.** Write a `conftest.py` fixture `data_dir` that creates `raw/` and `processed/` inside `tmp_path` and returns the base path.
-
-**B18.** Write a test using `caplog` asserting that a function logs the request URL at INFO and never logs the word `token` or the secret value.
-
-**B19.** Write a test using `capsys` asserting that `main(["--limit", "0"])` prints a summary line containing `wrote 0 records`.
-
-**B20.** Write a fixture that yields a fake HTTP client recording requested paths, and two tests that use it: one asserting the recorded paths, one asserting the returned data.
-
-**B21.** Explain the difference between a fixture that returns a value and one that yields, and when teardown code is mandatory.
-
-## Group C — Parametrized tests
-
-**C1.** How many test cases does each run: a single `parametrize` with 3 rows; two stacked decorators with 3 and 2 rows; a single decorator with 4 rows and `ids` provided?
-
-**C2.** Write parametrized tests for `parse_bool` with at least five cases and readable ids, including an invalid value that maps to `False`.
-
-**C3.** Convert this loop-based test into a parametrized one:
-
-```python
-def test_split():
-    for text, expected in [("a b", ["a", "b"]), ("  ", []), ("a  b", ["a", "b"])]:
-        assert text.split() == expected
-```
-
-**C4.** Rewrite this decorator using the tuple-of-names form and explain the difference in readability:
-
-```python
-@pytest.mark.parametrize("a,b,expected", [(1, 2, 3), (0, 0, 0)])
-def test_add(a, b, expected):
-    assert add(a, b) == expected
-```
-
-**C5.** Add `ids=["empty", "single", "unicode"]` to a parametrized test and state how the test IDs change.
-
-**C6.** Mark one row of a parametrized test as expected-to-fail with `pytest.param(..., marks=pytest.mark.xfail)`. Predict how pytest reports that row versus the others.
-
-**C7.** A failure is reported as `test_divide[3-5]` for `@pytest.mark.parametrize("a,b", ...)`. State which values were used in the failing case and how the id was formed.
-
-**C8.** Write the full parametrize table for `chunk(items, size)` covering: exact multiple, remainder, `size` larger than the input, and `size=1`. Include the expected output for each.
-
-**C9.** Write a parametrized test that expects exceptions, with rows shaped `(value, exception_type)`, using `pytest.raises(exc)` inside the test body.
-
-**C10.** Write a test with two stacked `parametrize` decorators of sizes 2 and 3. State the total number of cases and describe the id format.
-
-**C11.** Write parametrized cases for `normalize_text` including `None` handling if the function supports it, empty string, and whitespace-only input. If the function does not support `None`, write the case as expected-to-raise instead.
-
-**C12.** Write a parametrized round-trip test `save_json`/`load_json` over `tmp_path` using cases: a nested dict, an empty dict, and a dict with unicode text. Signature: `def test_round_trip(tmp_path, data)`.
-
-**C13.** State the difference between these two decorators and when each is clearer:
-
-```python
-@pytest.mark.parametrize("a,b", [(1, 2), (3, 4)])
-@pytest.mark.parametrize(("a", "b"), [(1, 2), (3, 4)])
-```
-
-**C14.** Write a parametrized test for `word_counts` that asserts the full output dict for inputs containing repeated words, punctuation-adjacent words, and mixed case (define the function's normalization from Chapter 1 if needed).
-
-**C15.** Write a parametrized test for an `average(xs)` function using `pytest.approx` for two cases with repeating decimals and one exact case.
-
-**C16.** This table has redundant rows that test the same behavior twice. Identify them and replace them with genuinely distinct boundary cases:
-
-```python
-@pytest.mark.parametrize("n,expected", [(2, 4), (3, 9), (4, 16), (5, 25), (6, 36)])
-def test_square(n, expected):
-    assert n * n == expected
-```
-
-## Group D — Testing exceptions and edge cases
-
-**D1.** Write a test asserting `parse_count("abc")` raises `ValueError` whose message contains `invalid count`.
-
-**D2.** Predict pass or fail and explain:
-
-```python
-with pytest.raises(ValueError, match="invalid"):
-    raise ValueError("Invalid input")
-```
-
-**D3.** Given an `ApiError` with a `status_code` attribute, write a test using `pytest.raises(...) as exc_info` that asserts both the type and the status code.
-
-**D4.** Write a test that would catch a function accidentally raising on valid input, and explain why wrapping the call in `pytest.raises(Exception)` is wrong as a success check.
-
-**D5.** `classify(429)` raises `RateLimitError`, a subclass of `ProviderError`. Predict whether `pytest.raises(ProviderError)` passes or fails, and whether that is desirable.
-
-**D6.** `parse_pair("k=")` returns `(None, None)` instead of raising (Chapter 2). Write the tests that pin this contract for both the missing-`=` case and a valid case.
-
-**D7.** Write an edge-case table for `first_negative(xs)`: empty list returns `None`, single negative, single positive, all negative, and mixed with the negative last.
-
-**D8.** Predict what `assert float("nan") == float("nan")` does in a test, then write the correct assertion using `math.isnan`.
-
-**D9.** Write a test that invalid JSON raises `json.JSONDecodeError`, deliberately without `match`, and explain why the message is a poor assertion target here.
-
-**D10.** Parametrize tests for a `Port` class (Chapter 2): valid values `1` and `65535`; invalid values `0`, `65536`, and `-1` raising `ValueError`.
-
-**D11.** Explain when to assert only the exception type, when to add a message fragment, and when asserting the full message is a mistake.
-
-**D12.** Write a test proving `add_tag(tags, tag)` does not mutate the input list, plus a test for its return value.
-
-**D13.** Write an idempotence test showing `load_config(raw)` produces equal results when called twice on the same input.
-
-**D14.** Write a test showing `safe_int("x", default=7)` returns `7` and does not raise.
-
-**D15.** This test asserts internal calls instead of behavior. Rewrite it to assert the observable result, and explain the maintenance benefit:
-
-```python
-def test_fetch_user(mocker):
-    repo = Mock()
-    service = UserService(repo)
-    service.fetch_user(1)
-    repo.find.assert_called_once_with(1)
-```
-
-**D16.** Write a test asserting that an error message includes the offending value `3` in a way that still works when the message gains surrounding text. Use a string-matching assertion with proper escaping, or a substring check on `str(exc_info.value)`.
-
-**D17.** A function must reject an empty `name` with a message naming the field. Write both the positive and negative tests, ensuring the negative one cannot pass when a different error is raised.
-
-## Group E — Temporary files and test isolation
-
-**E1.** Write a test that writes text to a file under `tmp_path` and reads it back, asserting round-trip equality with UTF-8 content.
-
-**E2.** Predict whether two tests can share the same `tmp_path` directory or see each other's files.
-
-**E3.** Rewrite this test so it does not use the repository's working directory, and explain what breaks in CI with the original:
-
-```python
-def test_generate_report():
-    generate_report("report.json")
-    assert Path("report.json").exists()
-```
-
-**E4.** Write a test for `count_lines(path)` creating a three-line file inside `tmp_path`.
-
-**E5.** Write a test for `save_json`/`load_json` that asserts the round trip, verifies the file ends with a newline, and uses a nested structure with a `"café"` string.
-
-**E6.** Test A writes `test_output.txt` next to the test file; test B reads it. Describe two ways this suite fails depending on how it is run.
-
-**E7.** A test relies on the current working directory to find `data/in.json`. Fix the test using `monkeypatch.chdir(tmp_path)` plus a file created in `tmp_path`, and explain why the original approach was order-dependent.
-
-**E8.** Write a CSV file inside `tmp_path` using `newline=""` and read it with `csv.DictReader`; assert the full list of dicts including that values are strings.
-
-**E9.** Write a session-scoped fixture using `tmp_path_factory` that creates a read-only corpus directory, plus a function-scoped test that copies one file from it before mutating.
-
-**E10.** Two tests both create `tmp_path / "data.json"` with different contents. Predict whether they can interfere, and explain the mechanism.
-
-**E11.** Write an end-to-end CLI test: create an input CSV in `tmp_path`, call `main(["--input", str(inp), "--output", str(out), "--limit", "2"])`, assert the exit code is `0`, and assert the output JSON contains exactly two records.
-
-**E12.** Explain why you should not delete `tmp_path` manually at the end of a test.
-
-**E13.** Write a test asserting that two runs of `save_json` on the same data produce byte-identical files (deterministic formatting), and name the two formatting decisions that make this true.
-
-**E14.** Write a test proving a function writes only under the output directory you pass: create a sentinel directory inside `tmp_path`, run the function with its output path inside a different subdirectory, and assert the sentinel directory is still empty while the expected file exists.
-
-**E15.** Explain the difference between `tmp_path` and `tmp_path_factory`, and state the scope of each.
-
 ## Group F — Mocking and isolating dependencies
 
 **F1.** Explain why the injected-client design from Chapter 2 usually removes the need for mocking, and rewrite this test to use a hand-written fake instead of patching:
@@ -908,6 +797,41 @@ def test_process(mocker):
 
 **F25.** A test mocks `datetime.datetime.now()` at the definition site while the code does `from datetime import datetime`. Explain why the patch has no effect and write the correct target.
 
+## 4.8 Unit tests versus integration tests
+
+- A **unit test** exercises one unit of logic with all dependencies faked or passed in. It is fast, deterministic, and has no external resources.
+- An **integration test** exercises real wiring: a real file on disk, the actual client against a mock transport, a database, or a live API. It is slower and may be flaky or require credentials.
+
+Practices:
+
+- Keep the fast suite default: `pytest` runs everything marked as unit plus local integration.
+- Separate tests that need the network or credentials with markers:
+
+```python
+@pytest.mark.integration
+def test_live_api_round_trip():
+    ...
+```
+
+```bash
+pytest -m "not integration"     # fast, hermetic suite for every commit
+pytest -m integration           # before release / nightly, with real credentials
+```
+
+- Skip when prerequisites are absent, naming the missing piece:
+
+```python
+@pytest.mark.skipif(not os.getenv("API_KEY"), reason="API_KEY not set")
+def test_live_api():
+    ...
+```
+
+- Tests against `httpx.MockTransport` are unit tests in spirit: they exercise the real code path without network variance. Reserve "integration" for things your process cannot fully control.
+- A test needing `time.sleep`, retries against a real endpoint, or shared mutable state is a maintenance liability; rewrite toward injection and fakes.
+- Smoke tests are integration tests too: run the CLI with `--help` or on a tiny sample and assert exit code `0`.
+
+CI ordering: format check, lint, type check, unit tests, then (optionally) integration tests. Fail fast on the cheap checks.
+
 ## Group G — Unit tests versus integration tests
 
 **G1.** Classify each as unit or integration and justify in one line: a test of `parse_bool`; a test of `fetch_json` using `MockTransport`; a test hitting the staging API with a real key; a CLI `--help` smoke test; a test writing and reading a `tmp_path` file; a test that requires `DATABASE_URL`.
@@ -933,6 +857,53 @@ def test_process(mocker):
 **G11.** Explain the difference between `skip`, `skipif`, and `xfail`; state the reporting outcome when an `xfail` test unexpectedly passes.
 
 **G12.** Write a smoke test asserting `main(["--help"])` exits with code `0`, using `pytest.raises(SystemExit)` and checking `exc_info.value.code`.
+
+## 4.9 Formatting, linting, and static type checking
+
+Three distinct tools with three distinct jobs:
+
+- **Formatter**: rewrites code to a canonical style. No judgment, no warnings. `ruff format` (compatible with `black`).
+- **Linter**: flags probable bugs and style problems; can auto-fix some. `ruff check`.
+- **Type checker**: verifies type hints without running code. `mypy` or `pyright`.
+
+```bash
+ruff format .                     # rewrite files
+ruff format --check .             # exit 1 if files would change (CI)
+ruff check .                      # report issues
+ruff check --fix .                # apply safe fixes
+mypy src                          # type-check the package
+```
+
+Configuration in `pyproject.toml`:
+
+```toml
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]          # pycodestyle errors, pyflakes, import sorting
+
+[tool.mypy]
+python_version = "3.11"
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
+```
+
+What the type checker catches that tests often miss:
+
+- Returning a value of the wrong type (`Incompatible return value type`).
+- Using a value that may be `None`: `str | None` must be narrowed with `if x is None` before use.
+- Mixing types in containers: `list[int]` receiving `list[str]`.
+- Keyword typos in calls to typed functions (`unexpected keyword argument`), which untyped code only discovers at runtime.
+
+Practical guidance:
+
+- Type-check `src`, not `tests` (or relax test checking with a per-module override); test files are allowed to be untyped.
+- Add `# type: ignore` only with a reason and a narrow scope; unexplained ignores accumulate as debt. Prefer fixing the annotation or the code.
+- Keep `Any` rare; it disables checking for that value.
+- Start gradual: annotate public functions and dataclasses first (Chapters 2 and 5); add strictness flags as the codebase complies.
+- Run all three tools in pre-commit or CI so the repository state is always consistent and mergeable.
 
 ## Group H — Formatting, linting, and static type checking
 
@@ -1003,6 +974,35 @@ result = cast(Any, value)  # type: ignore
 **H18.** Explain why many teams exclude tests from strict type checking and how the override in H10 keeps production code strict.
 
 **H19.** A `mypy` run reports `Module "app" has no attribute "fetch"` in a test while the import works at runtime. Give two likely causes and the diagnostic commands.
+
+## 4.10 Common mistakes and conventions
+
+Mistakes to avoid:
+
+1. Asserting truthiness (`assert result`) when the exact value matters.
+2. Sharing mutable state through module globals or class attributes; tests then pass only in a specific order.
+3. Loop-based pseudo-parametrization inside a test.
+4. Testing internal call sequences instead of observable behavior.
+5. Patching where a name is defined rather than where it is looked up.
+6. Mocks returning `Mock` objects and silently satisfying loose assertions.
+7. Hitting real networks or sleeping in tests.
+8. Depending on the working directory or writing into the repository.
+9. Catching `Exception` in tests with `pytest.raises(Exception)`, turning "no test" into "passed".
+10. Over-specifying exception messages with unescaped regex metacharacters in `match`.
+11. Leaving debug `print` calls and disabled tests (`@pytest.mark.skip`) forever.
+12. Letting format, lint, or type-check failures live in CI as "known issues".
+
+Conventions to adopt:
+
+- Test names describe behavior: `test_missing_api_key_raises_config_error`.
+- One behavior per test; a test with six asserts usually wants to be six tests or a parametrized one.
+- Arrange-act-assert structure, visually separated.
+- Fixtures for setup; parametrize for data; fakes or `MockTransport` for boundaries.
+- `tmp_path` for files, `monkeypatch` for environment, `caplog`/`capsys` for outputs.
+- Run `pytest -q` constantly; before committing run `ruff format .`, `ruff check .`, `mypy src`, `pytest`.
+- Add a regression test with every bug fix: reproduce the failure first, then fix.
+
+---
 
 ## Group I — TypeScript translations and mixed realistic tasks
 
@@ -1103,4 +1103,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Separate fast unit tests from marked integration tests, and skip cleanly when credentials are missing.
 - Run and configure `ruff format`, `ruff check`, and `mypy`, and explain what each tool catches that tests do not.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 5.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 5](../chapter-5/fastapi-pydantic.md).

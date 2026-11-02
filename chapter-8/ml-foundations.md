@@ -138,488 +138,6 @@ Streaming is a different contract. If you support it, stream normalized deltas a
 
 ---
 
-## 8.3 Structured outputs and validation
-
-Text is easy to generate and hard to trust. When the service needs data, ask for a JSON object and validate it:
-
-```python
-from pydantic import BaseModel, Field, ValidationError
-
-class Classification(BaseModel):
-    label: Literal["billing", "technical", "account", "other"]
-    confidence: float = Field(ge=0.0, le=1.0)
-    rationale: str = Field(min_length=1, max_length=500)
-```
-
-Prompt the model with the schema:
-
-```python
-schema = Classification.model_json_schema()
-system = (
-    "Classify the support message. Return only JSON matching this schema:\n"
-    f"{schema}"
-)
-```
-
-Parse and validate:
-
-```python
-try:
-    classification = Classification.model_validate_json(result.text)
-except ValidationError as exc:
-    raise ProviderBadResponse("model returned invalid structured output") from exc
-```
-
-Rules:
-
-- Never trust model JSON just because it parses. Validate types, ranges, enums, lengths, and cross-field rules.
-- Ask for JSON only when the provider supports a JSON mode or structured-output mode; otherwise the model may wrap JSON in prose.
-- Keep schemas small. Every field in the schema increases prompt size, latency, and the chance of malformed output.
-- Provide examples in the prompt when the schema is non-obvious, but keep them consistent with validation.
-- Retry a malformed response at most once, with the validation error appended to the prompt. Bound repair attempts and count them.
-- Treat validation failures as a provider-quality signal. Log the provider, model, finish reason, and error locations, not the full sensitive prompt.
-- If the output drives an action (refund, delete, deploy), require an explicit confirmation or a deterministic policy check. Model output is not authorization.
-
-Native structured-output modes can enforce a schema at generation time, but they are provider- and model-specific. Use them when available, and still validate locally.
-
----
-
-## 8.4 Timeouts, retries, and failure classification
-
-Every provider call can fail. Classify failures before deciding what to do:
-
-| Failure | Retry? | Typical local status |
-| --- | --- | --- |
-| Connection error | Yes, transient | `503` or `502` |
-| Read timeout | Yes, bounded | `504` |
-| `429` rate limit | Yes, honor `Retry-After` | `429` or `503` |
-| Provider `5xx` | Yes, bounded | `502` or `503` |
-| Provider `400` invalid request | No | `500` (your bug) or `400` (caller bug) |
-| `401`/`403` auth | No | `500` (misconfiguration) |
-| Content filter / safety refusal | Usually no | `422` or `400` |
-| Invalid structured output | One repair attempt, then no | `502` |
-| Caller input too long | No | `413` or `422` |
-
-Retry policy:
-
-```python
-async def call_with_retry(operation, *, attempts: int = 3, base_delay: float = 0.25):
-    for attempt in range(attempts):
-        try:
-            return await operation()
-        except (ProviderTimeout, ProviderUnavailable) as exc:
-            if attempt == attempts - 1:
-                raise
-            delay = base_delay * (2 ** attempt)
-            delay += random.uniform(0, delay / 2)      # jitter
-            await asyncio.sleep(delay)
-```
-
-Guidelines:
-
-- Set a timeout per attempt and an overall budget for the request. A 30-second timeout with five retries can occupy a worker for over two minutes.
-- Retry only transient failures. Never retry `400`, `401`, `403`, `404`, or `422` caused by your request or the caller's input.
-- Never retry a non-idempotent action unless the provider supports an idempotency key and you send one.
-- Avoid double retries: the SDK and your service should not both retry the same call with independent policies. Choose one owner.
-- Add jitter to avoid synchronized retry storms.
-- Honor `Retry-After`, but cap it to your remaining budget.
-- Circuit-break a failing provider: after repeated failures, fail fast for a short period instead of retrying every request.
-- Record attempt counts, final status, and the error class. Do not log API keys or full request bodies.
-
-Domain errors should be provider-independent:
-
-```python
-class ProviderError(Exception): ...
-class ProviderTimeout(ProviderError): ...
-class ProviderUnavailable(ProviderError): ...
-class ProviderRateLimited(ProviderError): ...
-class ProviderBadResponse(ProviderError): ...
-class ProviderRejected(ProviderError): ...       # non-retryable 4xx
-```
-
-Map them at the HTTP boundary with exception handlers, following Chapter 5. Do not raise `HTTPException` from the adapter or service.
-
----
-
-## 8.5 Rate limits, concurrency, tokens, and cost
-
-Providers limit requests per minute (RPM), tokens per minute (TPM), and concurrent requests. Your service also has finite capacity. Enforce both sides:
-
-- A semaphore bounds concurrent provider calls.
-- A token-bucket or sliding-window limiter bounds request or token rate.
-- Per-tenant quotas prevent one customer from exhausting the budget.
-- Per-request `max_output_tokens` prevents runaway generations.
-- Input length limits prevent oversized prompts and cost surprises.
-
-```python
-class ProviderLimiter:
-    def __init__(self, max_concurrency: int, requests_per_minute: float) -> None:
-        self._semaphore = asyncio.Semaphore(max_concurrency)
-        self._rate = TokenBucket(rate_per_second=requests_per_minute / 60)
-
-    async def acquire(self, estimated_tokens: int) -> None:
-        await self._rate.acquire(estimated_tokens)
-        await self._semaphore.acquire()
-
-    def release(self) -> None:
-        self._semaphore.release()
-```
-
-Token accounting:
-
-- Use the provider's `usage` when present. Do not estimate after the fact when exact counts are available.
-- Estimate input tokens before the call when you need preflight budget checks. A tokenizer such as `tiktoken` is model-specific; approximations drift.
-- Track prompt, completion, and total tokens per request, tenant, model, and day.
-- Include cached or reasoning tokens if the provider bills them; consult the provider's usage fields.
-
-Cost:
-
-```python
-def estimate_cost(
-    *,
-    input_tokens: int,
-    output_tokens: int,
-    input_rate_per_million: float,
-    output_rate_per_million: float,
-) -> float:
-    return (
-        input_tokens * input_rate_per_million
-        + output_tokens * output_rate_per_million
-    ) / 1_000_000
-```
-
-Keep rates in configuration, not hardcoded constants: prices and models change. Record the rate used with the metric so historical cost remains explainable. Use `Decimal` if accounting requires exact currency; `float` is acceptable for monitoring estimates.
-
-Performance metrics:
-
-- End-to-end latency and provider latency, reported as p50/p95/p99, not only averages.
-- Queue wait time before the provider call.
-- Tokens per request and tokens per second.
-- Repair attempts and malformed-output rate.
-- Rate-limit and timeout rates by provider and model.
-- Cost per successful request and per tenant.
-
-Budget controls:
-
-- Reject requests that exceed the per-request token or cost limit before calling the provider.
-- Enforce daily and monthly budgets per tenant.
-- Fail closed when accounting is unavailable for paid operations.
-- Cache deterministic results (same normalized request and prompt version) when the product allows it.
-- Truncate or summarize oversized inputs deliberately; never silently drop the middle of a prompt.
-
----
-
-## 8.6 Configuration, secrets, and dependency boundaries
-
-Configuration belongs in a typed settings object loaded from environment variables or a secret manager:
-
-```python
-from pydantic import BaseModel, Field, SecretStr, HttpUrl
-
-class Settings(BaseModel):
-    provider_api_key: SecretStr
-    provider_base_url: HttpUrl
-    model: str = Field(min_length=1)
-    request_timeout_seconds: float = Field(gt=0, le=120, default=30.0)
-    max_retries: int = Field(ge=0, le=5, default=2)
-    max_concurrency: int = Field(ge=1, le=200, default=20)
-    max_input_tokens: int = Field(ge=1, default=8_000)
-    max_output_tokens: int = Field(ge=1, default=1_000)
-    input_cost_per_million: float = Field(ge=0)
-    output_cost_per_million: float = Field(ge=0)
-```
-
-Rules:
-
-- Validate configuration at startup and fail fast with a clear error.
-- Use `SecretStr` for keys so accidental logging prints `**********`.
-- Never put secrets in code, tests, logs, error responses, or `/openapi.json`.
-- Keep model names and limits configurable per environment.
-- Separate provider credentials from application credentials. Rotate them independently.
-- Do not read environment variables inside route handlers; inject settings.
-- Cache immutable settings once per process with `lru_cache` (Chapter 5).
-- Override settings in tests rather than mutating global environment state.
-
-Secrets in exceptions:
-
-```python
-try:
-    ...
-except ProviderRejected as exc:
-    logger.warning("provider rejected request", extra={"error": str(exc)})
-```
-
-If the exception message can contain a URL with an API key, a token, or a prompt, sanitize it before logging. Prefer logging status codes, error classes, and request IDs over raw messages.
-
----
-
-## 8.7 Logging and metrics
-
-Use structured logs (JSON or key-value) with stable fields:
-
-```python
-logger.info(
-    "ai_request_completed",
-    extra={
-        "request_id": request_id,
-        "tenant_id": tenant_id,
-        "model": result.model,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
-        "cost_usd": cost,
-        "latency_ms": latency_ms,
-        "finish_reason": result.finish_reason,
-        "status": "ok",
-    },
-)
-```
-
-Log on completion, timeout, retry, validation failure, rate limit, and budget rejection. Include:
-
-- request ID and tenant ID
-- operation name and prompt version
-- model and provider
-- attempt count and final status
-- latency breakdown (queue, provider, validation)
-- token usage and estimated cost
-- error class and sanitized message
-
-Do not log:
-
-- API keys or authorization headers
-- full prompts or completions by default; they may contain personal or confidential data
-- provider response bodies that may include internal details
-- raw user identifiers when a hashed or internal ID suffices
-
-If prompt logging is required for debugging, gate it behind an explicit opt-in, sample it, redact it, and set a short retention period.
-
-Metrics and alerts:
-
-- `ai_requests_total{model,status}`
-- `ai_request_duration_seconds{model}` as a histogram
-- `ai_tokens_total{model,kind}`
-- `ai_cost_usd_total{model,tenant}`
-- `ai_retries_total{reason}`
-- `ai_validation_failures_total{model,reason}`
-- `ai_rate_limit_rejections_total{tenant}`
-
-Alert on error-rate spikes, p95 latency, malformed-output rate, budget burn, and provider-specific outages. A single slow model should be visible without reading logs.
-
-Tracing: propagate a request ID or trace context through the service, adapter, and provider metadata when supported. Never place secrets in trace attributes.
-
----
-
-## 8.8 The service layer
-
-The AI service orchestrates one operation. Keep it independent of FastAPI:
-
-```python
-class SummarizeService:
-    def __init__(
-        self,
-        model: LanguageModel,
-        settings: Settings,
-        limiter: ProviderLimiter,
-        metrics: Metrics,
-    ) -> None:
-        self._model = model
-        self._settings = settings
-        self._limiter = limiter
-        self._metrics = metrics
-
-    async def summarize(self, text: str, *, request_id: str) -> SummarizeResult:
-        prompt = build_summary_prompt(text, version="v3")
-        await self._limiter.acquire(estimated_tokens=len(text) // 4)
-        try:
-            result = await self._model.complete(
-                system=prompt.system,
-                user=prompt.user,
-                max_output_tokens=self._settings.max_output_tokens,
-            )
-        finally:
-            self._limiter.release()
-
-        summary = Summary.model_validate_json(result.text)   # may raise
-        self._metrics.record(result, request_id=request_id)
-        return SummarizeResult(summary=summary, usage=result)
-```
-
-Principles:
-
-- Validate the request at the route; validate the model output in the service.
-- Build prompts from versioned templates. Include the schema and output rules in the system prompt.
-- Enforce input length before calling the provider.
-- Apply concurrency and rate limits around the provider call, with cleanup in `finally`.
-- Convert adapter errors into domain errors; let the route's exception handlers map them to HTTP.
-- Record metrics after success and failure.
-- Never perform side effects (refunds, emails, database writes) until validated output and policy checks pass.
-- Make the operation idempotent where clients may retry: accept an idempotency key and store the result for replay.
-- Keep the service deterministic in tests by injecting a fake model, clock, and metrics recorder.
-
-Prompt versioning:
-
-```python
-PROMPTS = {
-    "summary": {
-        "v3": PromptTemplate(system="...", user="..."),
-    },
-}
-```
-
-Record the prompt version in logs and results. A prompt change is a behavior change; review it and test it like code.
-
----
-
-## 8.9 Testing with fake providers
-
-Unit and integration tests must not call a real provider.
-
-Fake implementing the protocol:
-
-```python
-class FakeLanguageModel:
-    def __init__(self, responses: list[str]) -> None:
-        self._responses = responses
-        self.calls: list[dict[str, object]] = []
-
-    async def complete(self, *, system: str, user: str, max_output_tokens: int) -> AIResult:
-        self.calls.append({"system": system, "user": user, "max_output_tokens": max_output_tokens})
-        text = self._responses.pop(0)
-        return AIResult(
-            text=text,
-            model="fake-model",
-            input_tokens=10,
-            output_tokens=5,
-            finish_reason="stop",
-        )
-```
-
-Test cases to cover:
-
-- valid structured output
-- malformed JSON
-- schema-valid JSON with invalid enum or range
-- `content=None`
-- provider timeout, connection error, `429`, `5xx`, `401`
-- rate-limit and budget rejection
-- repair attempt succeeds on the second response
-- repair attempt fails and returns the mapped error
-- truncation (`finish_reason="length"`)
-- content filter or refusal
-- idempotent replay
-- metrics recorded with expected fields and no secrets
-
-Testing layers:
-
-- **Adapter tests:** use `httpx.MockTransport` to verify SDK/HTTP mapping, headers, timeouts, and error normalization.
-- **Service tests:** use a fake `LanguageModel` to verify prompts, validation, retry/repair, limits, and metrics.
-- **API tests:** use `TestClient` or `AsyncClient(ASGITransport)` with dependency overrides to verify status codes and envelopes.
-- **Optional live smoke test:** gated behind an environment flag and never required for CI. It verifies credentials and a minimal call, not business logic.
-
-Do not assert exact model text. Assert the parsed structure, status, error class, and the fact that a validation error triggers a repair. For prompt tests, assert required instructions and schema fragments, not the entire prompt string.
-
----
-
-## 8.10 Packaging, CI, and TypeScript integration
-
-Packaging:
-
-- Use a `pyproject.toml` with project metadata and pinned dependency ranges.
-- Keep a lockfile for reproducible installs.
-- Provide a single entry point: `uvicorn app.main:app` or a console script.
-- Run as a non-root user in a container; do not bake secrets into the image.
-- Expose `/health` and `/ready`; readiness should check required dependencies without making paid calls.
-- Handle SIGTERM gracefully: stop accepting work, cancel or drain in-flight requests, close clients, flush metrics.
-
-Dependency hygiene:
-
-- Pin the provider SDK; it changes frequently.
-- Keep FastAPI, Pydantic, httpx, and the SDK compatible; test upgrades.
-- Separate development and production dependencies.
-- Avoid importing optional ML libraries at startup unless the service needs them.
-
-CI pipeline:
-
-```text
-install locked dependencies
-→ ruff format --check
-→ ruff check
-→ mypy
-→ pytest (unit + API, fake provider)
-→ build container/image
-→ optional manual smoke test with real credentials
-```
-
-CI must not require a live API key. Store any integration secrets in the CI secret store and mark those jobs optional or manually triggered.
-
-TypeScript integration:
-
-- Publish the OpenAPI schema and generate a typed client.
-- Define an error envelope with stable codes: `validation_error`, `rate_limited`, `provider_timeout`, `provider_unavailable`, `invalid_model_output`, `budget_exceeded`.
-- Document timeouts and retry expectations. Clients should retry only idempotent operations or requests with an idempotency key.
-- Return `Retry-After` for rate limits.
-- If streaming, document the event format and how to cancel the stream.
-- Authenticate service-to-service calls; do not rely on network isolation.
-- Configure CORS for browser clients deliberately, not with a wildcard in production.
-
-```ts
-type AIError = {
-  error: {
-    code:
-      | "validation_error"
-      | "rate_limited"
-      | "provider_timeout"
-      | "provider_unavailable"
-      | "invalid_model_output"
-      | "budget_exceeded";
-    message: string;
-    requestId: string;
-  };
-};
-```
-
----
-
-## 8.11 Common mistakes and conventions
-
-Mistakes to avoid:
-
-1. Returning raw provider responses or SDK objects to clients.
-2. Trusting model-generated JSON without Pydantic validation.
-3. Retrying validation failures indefinitely or without counting attempts.
-4. Retrying non-idempotent actions.
-5. Letting both the SDK and the service retry independently.
-6. Missing timeouts or setting one global timeout that ignores the request budget.
-7. Unbounded provider concurrency.
-8. Hardcoding model names, prices, or token limits in code.
-9. Logging API keys, prompts, or completions by default.
-10. Returning provider error text or stack traces to clients.
-11. Reading environment variables inside handlers.
-12. Calling the provider from the route with no service boundary.
-13. Performing side effects before validation and policy checks.
-14. Tests that hit the real provider or depend on its exact wording.
-15. Ignoring `finish_reason` and treating truncated output as complete.
-16. Counting tokens after the fact for preflight budget enforcement.
-17. Deploying without readiness checks or graceful shutdown.
-18. Exposing `/docs` or debug endpoints with secrets in examples.
-19. Assuming a model upgrade is backward-compatible.
-20. Skipping cost monitoring until the bill arrives.
-
-Conventions to adopt:
-
-- One adapter per provider; one normalized result model.
-- Structured output plus local validation for every machine-consumed response.
-- Domain error taxonomy with HTTP mapping at the boundary.
-- Explicit timeout and retry budget per operation; jittered backoff.
-- Semaphore plus rate limiter around provider calls; per-tenant quotas.
-- Usage-based token and cost accounting from provider metadata, with configurable rates.
-- Structured logs with request ID, model, tokens, cost, latency, and status; no secrets or raw prompts.
-- Fake providers for tests; `MockTransport` for adapter tests; optional live smoke tests only.
-- Typed settings validated at startup; secrets never logged.
-- OpenAPI contract, stable error codes, retry guidance, and generated TypeScript client.
-
----
-
 # Exercises
 
 Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
@@ -766,6 +284,52 @@ Then answer what to do when `total_tokens` disagrees with the sum of the other t
 3. How do tests replace the provider?
 4. Why should the route not construct the provider per request?
 5. What happens on shutdown?
+
+---
+
+## 8.3 Structured outputs and validation
+
+Text is easy to generate and hard to trust. When the service needs data, ask for a JSON object and validate it:
+
+```python
+from pydantic import BaseModel, Field, ValidationError
+
+class Classification(BaseModel):
+    label: Literal["billing", "technical", "account", "other"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str = Field(min_length=1, max_length=500)
+```
+
+Prompt the model with the schema:
+
+```python
+schema = Classification.model_json_schema()
+system = (
+    "Classify the support message. Return only JSON matching this schema:\n"
+    f"{schema}"
+)
+```
+
+Parse and validate:
+
+```python
+try:
+    classification = Classification.model_validate_json(result.text)
+except ValidationError as exc:
+    raise ProviderBadResponse("model returned invalid structured output") from exc
+```
+
+Rules:
+
+- Never trust model JSON just because it parses. Validate types, ranges, enums, lengths, and cross-field rules.
+- Ask for JSON only when the provider supports a JSON mode or structured-output mode; otherwise the model may wrap JSON in prose.
+- Keep schemas small. Every field in the schema increases prompt size, latency, and the chance of malformed output.
+- Provide examples in the prompt when the schema is non-obvious, but keep them consistent with validation.
+- Retry a malformed response at most once, with the validation error appended to the prompt. Bound repair attempts and count them.
+- Treat validation failures as a provider-quality signal. Log the provider, model, finish reason, and error locations, not the full sensitive prompt.
+- If the output drives an action (refund, delete, deploy), require an explicit confirmation or a deterministic policy check. Model output is not authorization.
+
+Native structured-output modes can enforce a schema at generation time, but they are provider- and model-specific. Use them when available, and still validate locally.
 
 ---
 
@@ -1065,6 +629,63 @@ Then answer what to do when `total_tokens` disagrees with the sum of the other t
 
 ---
 
+## 8.4 Timeouts, retries, and failure classification
+
+Every provider call can fail. Classify failures before deciding what to do:
+
+| Failure | Retry? | Typical local status |
+| --- | --- | --- |
+| Connection error | Yes, transient | `503` or `502` |
+| Read timeout | Yes, bounded | `504` |
+| `429` rate limit | Yes, honor `Retry-After` | `429` or `503` |
+| Provider `5xx` | Yes, bounded | `502` or `503` |
+| Provider `400` invalid request | No | `500` (your bug) or `400` (caller bug) |
+| `401`/`403` auth | No | `500` (misconfiguration) |
+| Content filter / safety refusal | Usually no | `422` or `400` |
+| Invalid structured output | One repair attempt, then no | `502` |
+| Caller input too long | No | `413` or `422` |
+
+Retry policy:
+
+```python
+async def call_with_retry(operation, *, attempts: int = 3, base_delay: float = 0.25):
+    for attempt in range(attempts):
+        try:
+            return await operation()
+        except (ProviderTimeout, ProviderUnavailable) as exc:
+            if attempt == attempts - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            delay += random.uniform(0, delay / 2)      # jitter
+            await asyncio.sleep(delay)
+```
+
+Guidelines:
+
+- Set a timeout per attempt and an overall budget for the request. A 30-second timeout with five retries can occupy a worker for over two minutes.
+- Retry only transient failures. Never retry `400`, `401`, `403`, `404`, or `422` caused by your request or the caller's input.
+- Never retry a non-idempotent action unless the provider supports an idempotency key and you send one.
+- Avoid double retries: the SDK and your service should not both retry the same call with independent policies. Choose one owner.
+- Add jitter to avoid synchronized retry storms.
+- Honor `Retry-After`, but cap it to your remaining budget.
+- Circuit-break a failing provider: after repeated failures, fail fast for a short period instead of retrying every request.
+- Record attempt counts, final status, and the error class. Do not log API keys or full request bodies.
+
+Domain errors should be provider-independent:
+
+```python
+class ProviderError(Exception): ...
+class ProviderTimeout(ProviderError): ...
+class ProviderUnavailable(ProviderError): ...
+class ProviderRateLimited(ProviderError): ...
+class ProviderBadResponse(ProviderError): ...
+class ProviderRejected(ProviderError): ...       # non-retryable 4xx
+```
+
+Map them at the HTTP boundary with exception handlers, following Chapter 5. Do not raise `HTTPException` from the adapter or service.
+
+---
+
 ## Group D — Timeouts, retries, and failure classification
 
 **D1.** Classify each failure as retryable or non-retryable: connection reset, read timeout, `429`, `500`, `400` invalid model, `401`, `403`, malformed JSON, content filter, and caller input too long. Then state the local status for each.
@@ -1236,6 +857,74 @@ Then answer what to do when `total_tokens` disagrees with the sum of the other t
 5. When is fallback inappropriate?
 
 **D26.** Write failure-injection tests for the adapter for timeout, `429`, `500`, malformed JSON, and `content=None`. Answer what each test asserts and why a fake transport is preferable to a real provider.
+
+---
+
+## 8.5 Rate limits, concurrency, tokens, and cost
+
+Providers limit requests per minute (RPM), tokens per minute (TPM), and concurrent requests. Your service also has finite capacity. Enforce both sides:
+
+- A semaphore bounds concurrent provider calls.
+- A token-bucket or sliding-window limiter bounds request or token rate.
+- Per-tenant quotas prevent one customer from exhausting the budget.
+- Per-request `max_output_tokens` prevents runaway generations.
+- Input length limits prevent oversized prompts and cost surprises.
+
+```python
+class ProviderLimiter:
+    def __init__(self, max_concurrency: int, requests_per_minute: float) -> None:
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._rate = TokenBucket(rate_per_second=requests_per_minute / 60)
+
+    async def acquire(self, estimated_tokens: int) -> None:
+        await self._rate.acquire(estimated_tokens)
+        await self._semaphore.acquire()
+
+    def release(self) -> None:
+        self._semaphore.release()
+```
+
+Token accounting:
+
+- Use the provider's `usage` when present. Do not estimate after the fact when exact counts are available.
+- Estimate input tokens before the call when you need preflight budget checks. A tokenizer such as `tiktoken` is model-specific; approximations drift.
+- Track prompt, completion, and total tokens per request, tenant, model, and day.
+- Include cached or reasoning tokens if the provider bills them; consult the provider's usage fields.
+
+Cost:
+
+```python
+def estimate_cost(
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    input_rate_per_million: float,
+    output_rate_per_million: float,
+) -> float:
+    return (
+        input_tokens * input_rate_per_million
+        + output_tokens * output_rate_per_million
+    ) / 1_000_000
+```
+
+Keep rates in configuration, not hardcoded constants: prices and models change. Record the rate used with the metric so historical cost remains explainable. Use `Decimal` if accounting requires exact currency; `float` is acceptable for monitoring estimates.
+
+Performance metrics:
+
+- End-to-end latency and provider latency, reported as p50/p95/p99, not only averages.
+- Queue wait time before the provider call.
+- Tokens per request and tokens per second.
+- Repair attempts and malformed-output rate.
+- Rate-limit and timeout rates by provider and model.
+- Cost per successful request and per tenant.
+
+Budget controls:
+
+- Reject requests that exceed the per-request token or cost limit before calling the provider.
+- Enforce daily and monthly budgets per tenant.
+- Fail closed when accounting is unavailable for paid operations.
+- Cache deterministic results (same normalized request and prompt version) when the product allows it.
+- Truncate or summarize oversized inputs deliberately; never silently drop the middle of a prompt.
 
 ---
 
@@ -1415,6 +1104,242 @@ Then answer what to do when `total_tokens` disagrees with the sum of the other t
 4. How do retries reduce effective capacity?
 5. What metrics would you monitor?
 
+## 8.6 Configuration, secrets, and dependency boundaries
+
+Configuration belongs in a typed settings object loaded from environment variables or a secret manager:
+
+```python
+from pydantic import BaseModel, Field, SecretStr, HttpUrl
+
+class Settings(BaseModel):
+    provider_api_key: SecretStr
+    provider_base_url: HttpUrl
+    model: str = Field(min_length=1)
+    request_timeout_seconds: float = Field(gt=0, le=120, default=30.0)
+    max_retries: int = Field(ge=0, le=5, default=2)
+    max_concurrency: int = Field(ge=1, le=200, default=20)
+    max_input_tokens: int = Field(ge=1, default=8_000)
+    max_output_tokens: int = Field(ge=1, default=1_000)
+    input_cost_per_million: float = Field(ge=0)
+    output_cost_per_million: float = Field(ge=0)
+```
+
+Rules:
+
+- Validate configuration at startup and fail fast with a clear error.
+- Use `SecretStr` for keys so accidental logging prints `**********`.
+- Never put secrets in code, tests, logs, error responses, or `/openapi.json`.
+- Keep model names and limits configurable per environment.
+- Separate provider credentials from application credentials. Rotate them independently.
+- Do not read environment variables inside route handlers; inject settings.
+- Cache immutable settings once per process with `lru_cache` (Chapter 5).
+- Override settings in tests rather than mutating global environment state.
+
+Secrets in exceptions:
+
+```python
+try:
+    ...
+except ProviderRejected as exc:
+    logger.warning("provider rejected request", extra={"error": str(exc)})
+```
+
+If the exception message can contain a URL with an API key, a token, or a prompt, sanitize it before logging. Prefer logging status codes, error classes, and request IDs over raw messages.
+
+---
+
+## Group G — Configuration, secrets, and dependency boundaries
+
+**G1.** Define a typed `Settings` model for the AI service. Include provider credentials, model, base URL, timeout, retries, concurrency, token limits, and cost rates. Answer which fields are secrets and which are safe to log.
+
+**G2.** Use `SecretStr` for the API key. Answer:
+
+1. What does printing the settings show?
+2. How do you obtain the real value for the SDK?
+3. What happens if code logs `settings.model_dump()`?
+4. How do you prevent accidental serialization to JSON?
+
+**G3.** A required environment variable is missing at startup. Answer:
+
+1. What should happen?
+2. Why is failing fast better than starting and failing on the first request?
+3. What should the error message include and omit?
+4. How do you test the startup failure?
+
+**G4.** An environment variable contains `TIMEOUT_SECONDS="abc"`. Answer:
+
+1. Which layer should catch the error?
+2. What should the process do?
+3. Why is a string comparison insufficient?
+4. How do you provide a helpful error without printing secrets?
+
+**G5.** Cache settings with `lru_cache`. Answer:
+
+1. Why cache them?
+2. When are they loaded?
+3. Why can tests leak configuration between cases?
+4. How do you clear the cache?
+5. Why is per-request environment reading discouraged?
+
+**G6.** Override settings in a test. Answer:
+
+1. Which dependency do you override?
+2. Why is this safer than mutating `os.environ`?
+3. How do you clean up?
+4. What happens if two tests override different values concurrently?
+
+**G7.** A handler reads `os.environ["PROVIDER_API_KEY"]` directly. Answer:
+
+1. Which layers does this couple?
+2. How does it complicate testing?
+3. Where should the value be injected instead?
+4. Why is this also a security risk?
+
+**G8.** Model names are hardcoded in three modules. Answer:
+
+1. Why is this a configuration problem?
+2. How do you switch models per environment?
+3. How do you record which model served a request?
+4. What happens during a model deprecation?
+
+**G9.** The provider base URL points to a regional endpoint. Answer:
+
+1. Why should it be configurable?
+2. How do you validate it?
+3. What must not be logged?
+4. How do you test routing without network access?
+
+**G10.** Compare development, staging, and production configuration. Answer:
+
+1. Which values differ?
+2. Which values must never be shared?
+3. How do you prevent a staging key from reaching production?
+4. How do you validate the environment name?
+
+**G11.** Rotate the provider API key without downtime. Answer:
+
+1. What deployment sequence supports rotation?
+2. How do you avoid logging the old or new key?
+3. What happens to in-flight requests?
+4. How do you verify the new key works?
+
+**G12.** A custom exception includes the full request URL, which contains an API key in a query parameter. Answer:
+
+1. What is wrong with this design?
+2. How do you move credentials out of the URL?
+3. How do you sanitize the exception before logging?
+4. What should the client receive?
+
+**G13.** Define the dependency graph: settings, provider client, limiter, metrics, service, route. Answer which objects are singletons per process, which are per request, and which are per test.
+
+**G14.** Replace the real provider with a fake in an API test. Answer:
+
+1. Which dependency key is overridden?
+2. What must the fake implement?
+3. How do you assert the fake was called?
+4. Why should the override be cleared?
+5. What should not be overridden if you want to test wiring?
+
+**G15.** Compare storing the provider client on `app.state` with a module-level global. Answer:
+
+1. Which one supports multiple app instances in tests?
+2. Which one risks leaking across tests?
+3. How does lifespan interact with each?
+4. Why is `app.state` closer to correct for connection pooling?
+
+**G16.** Put concurrency, timeout, retry, and token limits in settings. Answer:
+
+1. Which limits are safe to change at runtime?
+2. Which require a restart?
+3. How do you document defaults?
+4. What happens if a limit is set to zero or negative?
+
+**G17.** Store per-model cost rates in configuration. Answer:
+
+1. What structure would you use?
+2. How do you handle a model missing from the table?
+3. Why should the rate used be recorded per request?
+4. How do you update rates without a code deploy?
+
+**G18.** Validate that the configured model is in an allowlist at startup. Answer:
+
+1. Why is this safer than accepting arbitrary model names?
+2. What happens when a model is deprecated?
+3. How do you test the allowlist?
+4. What should the client see when the configured model is unavailable?
+
+**G19.** A provider SDK raises an exception whose string contains the API key. Answer:
+
+1. How do you prevent it from reaching logs?
+2. How do you prevent it from reaching the client?
+3. What should the domain exception carry instead?
+4. How do you test the redaction?
+
+**G20.** Define configuration precedence: defaults, environment, explicit test override. Answer:
+
+1. Which source wins?
+2. Why should production secrets never rely on defaults?
+3. How do you test each layer?
+4. How do you keep the precedence documented?
+
+---
+
+## 8.7 Logging and metrics
+
+Use structured logs (JSON or key-value) with stable fields:
+
+```python
+logger.info(
+    "ai_request_completed",
+    extra={
+        "request_id": request_id,
+        "tenant_id": tenant_id,
+        "model": result.model,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "cost_usd": cost,
+        "latency_ms": latency_ms,
+        "finish_reason": result.finish_reason,
+        "status": "ok",
+    },
+)
+```
+
+Log on completion, timeout, retry, validation failure, rate limit, and budget rejection. Include:
+
+- request ID and tenant ID
+- operation name and prompt version
+- model and provider
+- attempt count and final status
+- latency breakdown (queue, provider, validation)
+- token usage and estimated cost
+- error class and sanitized message
+
+Do not log:
+
+- API keys or authorization headers
+- full prompts or completions by default; they may contain personal or confidential data
+- provider response bodies that may include internal details
+- raw user identifiers when a hashed or internal ID suffices
+
+If prompt logging is required for debugging, gate it behind an explicit opt-in, sample it, redact it, and set a short retention period.
+
+Metrics and alerts:
+
+- `ai_requests_total{model,status}`
+- `ai_request_duration_seconds{model}` as a histogram
+- `ai_tokens_total{model,kind}`
+- `ai_cost_usd_total{model,tenant}`
+- `ai_retries_total{reason}`
+- `ai_validation_failures_total{model,reason}`
+- `ai_rate_limit_rejections_total{tenant}`
+
+Alert on error-rate spikes, p95 latency, malformed-output rate, budget burn, and provider-specific outages. A single slow model should be visible without reading logs.
+
+Tracing: propagate a request ID or trace context through the service, adapter, and provider metadata when supported. Never place secrets in trace attributes.
+
+---
+
 ## Group F — Logging and metrics
 
 **F1.** List the fields you would include in a completion log for one AI request. For each field, state whether it is required on success, on failure, or both.
@@ -1555,139 +1480,269 @@ Then answer what to do when `total_tokens` disagrees with the sum of the other t
 
 ---
 
-## Group G — Configuration, secrets, and dependency boundaries
+## 8.8 The service layer
 
-**G1.** Define a typed `Settings` model for the AI service. Include provider credentials, model, base URL, timeout, retries, concurrency, token limits, and cost rates. Answer which fields are secrets and which are safe to log.
+The AI service orchestrates one operation. Keep it independent of FastAPI:
 
-**G2.** Use `SecretStr` for the API key. Answer:
+```python
+class SummarizeService:
+    def __init__(
+        self,
+        model: LanguageModel,
+        settings: Settings,
+        limiter: ProviderLimiter,
+        metrics: Metrics,
+    ) -> None:
+        self._model = model
+        self._settings = settings
+        self._limiter = limiter
+        self._metrics = metrics
 
-1. What does printing the settings show?
-2. How do you obtain the real value for the SDK?
-3. What happens if code logs `settings.model_dump()`?
-4. How do you prevent accidental serialization to JSON?
+    async def summarize(self, text: str, *, request_id: str) -> SummarizeResult:
+        prompt = build_summary_prompt(text, version="v3")
+        await self._limiter.acquire(estimated_tokens=len(text) // 4)
+        try:
+            result = await self._model.complete(
+                system=prompt.system,
+                user=prompt.user,
+                max_output_tokens=self._settings.max_output_tokens,
+            )
+        finally:
+            self._limiter.release()
 
-**G3.** A required environment variable is missing at startup. Answer:
+        summary = Summary.model_validate_json(result.text)   # may raise
+        self._metrics.record(result, request_id=request_id)
+        return SummarizeResult(summary=summary, usage=result)
+```
 
-1. What should happen?
-2. Why is failing fast better than starting and failing on the first request?
-3. What should the error message include and omit?
-4. How do you test the startup failure?
+Principles:
 
-**G4.** An environment variable contains `TIMEOUT_SECONDS="abc"`. Answer:
+- Validate the request at the route; validate the model output in the service.
+- Build prompts from versioned templates. Include the schema and output rules in the system prompt.
+- Enforce input length before calling the provider.
+- Apply concurrency and rate limits around the provider call, with cleanup in `finally`.
+- Convert adapter errors into domain errors; let the route's exception handlers map them to HTTP.
+- Record metrics after success and failure.
+- Never perform side effects (refunds, emails, database writes) until validated output and policy checks pass.
+- Make the operation idempotent where clients may retry: accept an idempotency key and store the result for replay.
+- Keep the service deterministic in tests by injecting a fake model, clock, and metrics recorder.
 
-1. Which layer should catch the error?
-2. What should the process do?
-3. Why is a string comparison insufficient?
-4. How do you provide a helpful error without printing secrets?
+Prompt versioning:
 
-**G5.** Cache settings with `lru_cache`. Answer:
+```python
+PROMPTS = {
+    "summary": {
+        "v3": PromptTemplate(system="...", user="..."),
+    },
+}
+```
 
-1. Why cache them?
-2. When are they loaded?
-3. Why can tests leak configuration between cases?
-4. How do you clear the cache?
-5. Why is per-request environment reading discouraged?
+Record the prompt version in logs and results. A prompt change is a behavior change; review it and test it like code.
 
-**G6.** Override settings in a test. Answer:
+---
 
-1. Which dependency do you override?
-2. Why is this safer than mutating `os.environ`?
-3. How do you clean up?
-4. What happens if two tests override different values concurrently?
+## Group I — FastAPI service integration
 
-**G7.** A handler reads `os.environ["PROVIDER_API_KEY"]` directly. Answer:
+**I1.** A route contains prompt building, provider calls, parsing, retries, and metrics. Refactor it so the route is thin. Answer what the route should keep and what moves to the service.
 
-1. Which layers does this couple?
-2. How does it complicate testing?
-3. Where should the value be injected instead?
-4. Why is this also a security risk?
+**I2.** Define a request model for a summarization endpoint. Answer:
 
-**G8.** Model names are hardcoded in three modules. Answer:
+1. Which fields are required?
+2. Which constraints apply?
+3. How do you reject extra fields?
+4. How do you keep the request model free of provider-specific options?
 
-1. Why is this a configuration problem?
-2. How do you switch models per environment?
-3. How do you record which model served a request?
-4. What happens during a model deprecation?
+**I3.** Define the response model. Answer:
 
-**G9.** The provider base URL points to a regional endpoint. Answer:
+1. Which fields should be exposed to clients?
+2. Which internal fields should be excluded?
+3. How do you include usage and model information without leaking secrets?
+4. Why is a response model a security boundary?
 
-1. Why should it be configurable?
-2. How do you validate it?
-3. What must not be logged?
-4. How do you test routing without network access?
+**I4.** Map domain errors to HTTP with exception handlers. Answer:
 
-**G10.** Compare development, staging, and production configuration. Answer:
+1. Which errors map to `504`, `429`, `502`, `422`, and `500`?
+2. Which handler returns `Retry-After`?
+3. How do you keep the error envelope consistent?
+4. Where should the request ID come from?
 
-1. Which values differ?
-2. Which values must never be shared?
-3. How do you prevent a staging key from reaching production?
-4. How do you validate the environment name?
+**I5.** Inject the service into the route with `Depends`. Answer:
 
-**G11.** Rotate the provider API key without downtime. Answer:
+1. How are settings, provider, limiter, and metrics wired?
+2. Which objects are created once per process?
+3. How do tests override the provider?
+4. Why should the route not instantiate the service directly?
 
-1. What deployment sequence supports rotation?
-2. How do you avoid logging the old or new key?
-3. What happens to in-flight requests?
-4. How do you verify the new key works?
+**I6.** Add authentication to the AI endpoint. Answer:
 
-**G12.** A custom exception includes the full request URL, which contains an API key in a query parameter. Answer:
+1. Where should the token be validated?
+2. How do you map a missing token?
+3. How do you pass the tenant identity to the service?
+4. Why should the service not parse raw headers?
 
-1. What is wrong with this design?
-2. How do you move credentials out of the URL?
-3. How do you sanitize the exception before logging?
-4. What should the client receive?
+**I7.** Enforce a per-tenant quota before calling the provider. Answer:
 
-**G13.** Define the dependency graph: settings, provider client, limiter, metrics, service, route. Answer which objects are singletons per process, which are per request, and which are per test.
+1. Where does the check live?
+2. What happens when the quota is exhausted?
+3. How do you avoid race conditions between concurrent requests?
+4. What status and error code should result?
 
-**G14.** Replace the real provider with a fake in an API test. Answer:
+**I8.** Add idempotency to a generation endpoint. Answer:
 
-1. Which dependency key is overridden?
-2. What must the fake implement?
-3. How do you assert the fake was called?
-4. Why should the override be cleared?
-5. What should not be overridden if you want to test wiring?
+1. Which header carries the key?
+2. What do you store for replay?
+3. How do you handle concurrent duplicates?
+4. How long do you retain the record?
+5. What happens with the same key and a different body?
 
-**G15.** Compare storing the provider client on `app.state` with a module-level global. Answer:
+**I9.** Implement rate limiting as a dependency. Answer:
 
-1. Which one supports multiple app instances in tests?
-2. Which one risks leaking across tests?
-3. How does lifespan interact with each?
-4. Why is `app.state` closer to correct for connection pooling?
+1. Which parameters does the dependency read?
+2. What does it return or raise?
+3. How do you test it without real time?
+4. Why is a dependency better than ad hoc checks in each route?
 
-**G16.** Put concurrency, timeout, retry, and token limits in settings. Answer:
+**I10.** Enforce a request timeout around the service call. Answer:
 
-1. Which limits are safe to change at runtime?
-2. Which require a restart?
-3. How do you document defaults?
-4. What happens if a limit is set to zero or negative?
+1. Where is the timeout applied?
+2. What exception does the route catch or map?
+3. What happens to the provider call on timeout?
+4. How do you avoid a handler that swallows `CancelledError`?
 
-**G17.** Store per-model cost rates in configuration. Answer:
+**I11.** Add a streaming endpoint. Answer:
 
-1. What structure would you use?
-2. How do you handle a model missing from the table?
-3. Why should the rate used be recorded per request?
-4. How do you update rates without a code deploy?
+1. Which response class is used?
+2. What media type suits server-sent events?
+3. How do you format each event?
+4. How do you signal an error after streaming starts?
+5. How do you clean up the provider stream on disconnect?
 
-**G18.** Validate that the configured model is in an allowlist at startup. Answer:
+**I12.** Add health and readiness endpoints. Answer:
 
-1. Why is this safer than accepting arbitrary model names?
-2. What happens when a model is deprecated?
-3. How do you test the allowlist?
-4. What should the client see when the configured model is unavailable?
+1. What does health check?
+2. What does readiness check?
+3. Why should readiness not make a paid provider call?
+4. What status should each return when a dependency is down?
 
-**G19.** A provider SDK raises an exception whose string contains the API key. Answer:
+**I13.** Handle shutdown gracefully. Answer:
 
-1. How do you prevent it from reaching logs?
-2. How do you prevent it from reaching the client?
-3. What should the domain exception carry instead?
-4. How do you test the redaction?
+1. In what order do you stop accepting requests, cancel tasks, close the provider client, and flush metrics?
+2. What happens to in-flight requests?
+3. How do you log unfinished work?
+4. Why is lifespan the right place?
 
-**G20.** Define configuration precedence: defaults, environment, explicit test override. Answer:
+**I14.** Create the provider client in lifespan and store it on `app.state`. Answer:
 
-1. Which source wins?
-2. Why should production secrets never rely on defaults?
-3. How do you test each layer?
-4. How do you keep the precedence documented?
+1. Why not create it at import time?
+2. When is it closed?
+3. How do tests replace it?
+4. What happens if startup fails after creation?
+
+**I15.** Return a consistent error envelope for all AI failures. Answer:
+
+1. Which fields are stable?
+2. Which fields are optional?
+3. How do you avoid leaking provider details?
+4. How do TypeScript clients discriminate error codes?
+
+**I16.** Add a request ID to every response and log. Answer:
+
+1. Where is it generated?
+2. How is it propagated to the service and provider?
+3. How is it included in errors?
+4. How do you prevent clients from forging it?
+
+**I17.** Publish an OpenAPI schema for the service. Answer:
+
+1. Which routes and schemas appear?
+2. How do you document error responses?
+3. How do you avoid exposing internal models?
+4. How do you keep the schema versioned?
+
+**I18.** Configure CORS for a browser client. Answer:
+
+1. Which origins should be allowed in development and production?
+2. Why is a wildcard dangerous with credentials?
+3. Which headers must be allowed?
+4. How do you test preflight behavior?
+
+**I19.** Limit request body size and input length. Answer:
+
+1. Where should the body-size limit live?
+2. Where should the model-input limit live?
+3. What status should an oversized request receive?
+4. How do you avoid reading a huge body into memory?
+
+**I20.** Choose `def` or `async def` for the AI route. Answer:
+
+1. Which one is correct for an async provider client?
+2. What happens if the route calls a blocking SDK in `async def`?
+3. How does the choice interact with the concurrency limiter?
+4. What would you do if the SDK had no async client?
+
+**I21.** Test the route with dependency overrides. Answer:
+
+1. Which dependencies do you override?
+2. How do you assert the response schema?
+3. How do you assert metrics and retries?
+4. What should remain real in the test?
+
+**I22.** Version the AI API. Answer:
+
+1. Where does the version live?
+2. Which changes are compatible?
+3. How do you add a required response field without breaking clients?
+4. How do you retire an old model or prompt version?
+
+---
+
+## 8.9 Testing with fake providers
+
+Unit and integration tests must not call a real provider.
+
+Fake implementing the protocol:
+
+```python
+class FakeLanguageModel:
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = responses
+        self.calls: list[dict[str, object]] = []
+
+    async def complete(self, *, system: str, user: str, max_output_tokens: int) -> AIResult:
+        self.calls.append({"system": system, "user": user, "max_output_tokens": max_output_tokens})
+        text = self._responses.pop(0)
+        return AIResult(
+            text=text,
+            model="fake-model",
+            input_tokens=10,
+            output_tokens=5,
+            finish_reason="stop",
+        )
+```
+
+Test cases to cover:
+
+- valid structured output
+- malformed JSON
+- schema-valid JSON with invalid enum or range
+- `content=None`
+- provider timeout, connection error, `429`, `5xx`, `401`
+- rate-limit and budget rejection
+- repair attempt succeeds on the second response
+- repair attempt fails and returns the mapped error
+- truncation (`finish_reason="length"`)
+- content filter or refusal
+- idempotent replay
+- metrics recorded with expected fields and no secrets
+
+Testing layers:
+
+- **Adapter tests:** use `httpx.MockTransport` to verify SDK/HTTP mapping, headers, timeouts, and error normalization.
+- **Service tests:** use a fake `LanguageModel` to verify prompts, validation, retry/repair, limits, and metrics.
+- **API tests:** use `TestClient` or `AsyncClient(ASGITransport)` with dependency overrides to verify status codes and envelopes.
+- **Optional live smoke test:** gated behind an environment flag and never required for CI. It verifies credentials and a minimal call, not business logic.
+
+Do not assert exact model text. Assert the parsed structure, status, error class, and the fact that a validation error triggers a repair. For prompt tests, assert required instructions and schema fragments, not the entire prompt string.
 
 ---
 
@@ -1861,158 +1916,103 @@ Then answer what to do when `total_tokens` disagrees with the sum of the other t
 
 ---
 
-## Group I — FastAPI service integration
+## 8.10 Packaging, CI, and TypeScript integration
 
-**I1.** A route contains prompt building, provider calls, parsing, retries, and metrics. Refactor it so the route is thin. Answer what the route should keep and what moves to the service.
+Packaging:
 
-**I2.** Define a request model for a summarization endpoint. Answer:
+- Use a `pyproject.toml` with project metadata and pinned dependency ranges.
+- Keep a lockfile for reproducible installs.
+- Provide a single entry point: `uvicorn app.main:app` or a console script.
+- Run as a non-root user in a container; do not bake secrets into the image.
+- Expose `/health` and `/ready`; readiness should check required dependencies without making paid calls.
+- Handle SIGTERM gracefully: stop accepting work, cancel or drain in-flight requests, close clients, flush metrics.
 
-1. Which fields are required?
-2. Which constraints apply?
-3. How do you reject extra fields?
-4. How do you keep the request model free of provider-specific options?
+Dependency hygiene:
 
-**I3.** Define the response model. Answer:
+- Pin the provider SDK; it changes frequently.
+- Keep FastAPI, Pydantic, httpx, and the SDK compatible; test upgrades.
+- Separate development and production dependencies.
+- Avoid importing optional ML libraries at startup unless the service needs them.
 
-1. Which fields should be exposed to clients?
-2. Which internal fields should be excluded?
-3. How do you include usage and model information without leaking secrets?
-4. Why is a response model a security boundary?
+CI pipeline:
 
-**I4.** Map domain errors to HTTP with exception handlers. Answer:
+```text
+install locked dependencies
+→ ruff format --check
+→ ruff check
+→ mypy
+→ pytest (unit + API, fake provider)
+→ build container/image
+→ optional manual smoke test with real credentials
+```
 
-1. Which errors map to `504`, `429`, `502`, `422`, and `500`?
-2. Which handler returns `Retry-After`?
-3. How do you keep the error envelope consistent?
-4. Where should the request ID come from?
+CI must not require a live API key. Store any integration secrets in the CI secret store and mark those jobs optional or manually triggered.
 
-**I5.** Inject the service into the route with `Depends`. Answer:
+TypeScript integration:
 
-1. How are settings, provider, limiter, and metrics wired?
-2. Which objects are created once per process?
-3. How do tests override the provider?
-4. Why should the route not instantiate the service directly?
+- Publish the OpenAPI schema and generate a typed client.
+- Define an error envelope with stable codes: `validation_error`, `rate_limited`, `provider_timeout`, `provider_unavailable`, `invalid_model_output`, `budget_exceeded`.
+- Document timeouts and retry expectations. Clients should retry only idempotent operations or requests with an idempotency key.
+- Return `Retry-After` for rate limits.
+- If streaming, document the event format and how to cancel the stream.
+- Authenticate service-to-service calls; do not rely on network isolation.
+- Configure CORS for browser clients deliberately, not with a wildcard in production.
 
-**I6.** Add authentication to the AI endpoint. Answer:
+```ts
+type AIError = {
+  error: {
+    code:
+      | "validation_error"
+      | "rate_limited"
+      | "provider_timeout"
+      | "provider_unavailable"
+      | "invalid_model_output"
+      | "budget_exceeded";
+    message: string;
+    requestId: string;
+  };
+};
+```
 
-1. Where should the token be validated?
-2. How do you map a missing token?
-3. How do you pass the tenant identity to the service?
-4. Why should the service not parse raw headers?
+---
 
-**I7.** Enforce a per-tenant quota before calling the provider. Answer:
+## 8.11 Common mistakes and conventions
 
-1. Where does the check live?
-2. What happens when the quota is exhausted?
-3. How do you avoid race conditions between concurrent requests?
-4. What status and error code should result?
+Mistakes to avoid:
 
-**I8.** Add idempotency to a generation endpoint. Answer:
+1. Returning raw provider responses or SDK objects to clients.
+2. Trusting model-generated JSON without Pydantic validation.
+3. Retrying validation failures indefinitely or without counting attempts.
+4. Retrying non-idempotent actions.
+5. Letting both the SDK and the service retry independently.
+6. Missing timeouts or setting one global timeout that ignores the request budget.
+7. Unbounded provider concurrency.
+8. Hardcoding model names, prices, or token limits in code.
+9. Logging API keys, prompts, or completions by default.
+10. Returning provider error text or stack traces to clients.
+11. Reading environment variables inside handlers.
+12. Calling the provider from the route with no service boundary.
+13. Performing side effects before validation and policy checks.
+14. Tests that hit the real provider or depend on its exact wording.
+15. Ignoring `finish_reason` and treating truncated output as complete.
+16. Counting tokens after the fact for preflight budget enforcement.
+17. Deploying without readiness checks or graceful shutdown.
+18. Exposing `/docs` or debug endpoints with secrets in examples.
+19. Assuming a model upgrade is backward-compatible.
+20. Skipping cost monitoring until the bill arrives.
 
-1. Which header carries the key?
-2. What do you store for replay?
-3. How do you handle concurrent duplicates?
-4. How long do you retain the record?
-5. What happens with the same key and a different body?
+Conventions to adopt:
 
-**I9.** Implement rate limiting as a dependency. Answer:
-
-1. Which parameters does the dependency read?
-2. What does it return or raise?
-3. How do you test it without real time?
-4. Why is a dependency better than ad hoc checks in each route?
-
-**I10.** Enforce a request timeout around the service call. Answer:
-
-1. Where is the timeout applied?
-2. What exception does the route catch or map?
-3. What happens to the provider call on timeout?
-4. How do you avoid a handler that swallows `CancelledError`?
-
-**I11.** Add a streaming endpoint. Answer:
-
-1. Which response class is used?
-2. What media type suits server-sent events?
-3. How do you format each event?
-4. How do you signal an error after streaming starts?
-5. How do you clean up the provider stream on disconnect?
-
-**I12.** Add health and readiness endpoints. Answer:
-
-1. What does health check?
-2. What does readiness check?
-3. Why should readiness not make a paid provider call?
-4. What status should each return when a dependency is down?
-
-**I13.** Handle shutdown gracefully. Answer:
-
-1. In what order do you stop accepting requests, cancel tasks, close the provider client, and flush metrics?
-2. What happens to in-flight requests?
-3. How do you log unfinished work?
-4. Why is lifespan the right place?
-
-**I14.** Create the provider client in lifespan and store it on `app.state`. Answer:
-
-1. Why not create it at import time?
-2. When is it closed?
-3. How do tests replace it?
-4. What happens if startup fails after creation?
-
-**I15.** Return a consistent error envelope for all AI failures. Answer:
-
-1. Which fields are stable?
-2. Which fields are optional?
-3. How do you avoid leaking provider details?
-4. How do TypeScript clients discriminate error codes?
-
-**I16.** Add a request ID to every response and log. Answer:
-
-1. Where is it generated?
-2. How is it propagated to the service and provider?
-3. How is it included in errors?
-4. How do you prevent clients from forging it?
-
-**I17.** Publish an OpenAPI schema for the service. Answer:
-
-1. Which routes and schemas appear?
-2. How do you document error responses?
-3. How do you avoid exposing internal models?
-4. How do you keep the schema versioned?
-
-**I18.** Configure CORS for a browser client. Answer:
-
-1. Which origins should be allowed in development and production?
-2. Why is a wildcard dangerous with credentials?
-3. Which headers must be allowed?
-4. How do you test preflight behavior?
-
-**I19.** Limit request body size and input length. Answer:
-
-1. Where should the body-size limit live?
-2. Where should the model-input limit live?
-3. What status should an oversized request receive?
-4. How do you avoid reading a huge body into memory?
-
-**I20.** Choose `def` or `async def` for the AI route. Answer:
-
-1. Which one is correct for an async provider client?
-2. What happens if the route calls a blocking SDK in `async def`?
-3. How does the choice interact with the concurrency limiter?
-4. What would you do if the SDK had no async client?
-
-**I21.** Test the route with dependency overrides. Answer:
-
-1. Which dependencies do you override?
-2. How do you assert the response schema?
-3. How do you assert metrics and retries?
-4. What should remain real in the test?
-
-**I22.** Version the AI API. Answer:
-
-1. Where does the version live?
-2. Which changes are compatible?
-3. How do you add a required response field without breaking clients?
-4. How do you retire an old model or prompt version?
+- One adapter per provider; one normalized result model.
+- Structured output plus local validation for every machine-consumed response.
+- Domain error taxonomy with HTTP mapping at the boundary.
+- Explicit timeout and retry budget per operation; jittered backoff.
+- Semaphore plus rate limiter around provider calls; per-tenant quotas.
+- Usage-based token and cost accounting from provider metadata, with configurable rates.
+- Structured logs with request ID, model, tokens, cost, latency, and status; no secrets or raw prompts.
+- Fake providers for tests; `MockTransport` for adapter tests; optional live smoke tests only.
+- Typed settings validated at startup; secrets never logged.
+- OpenAPI contract, stable error codes, retry guidance, and generated TypeScript client.
 
 ---
 
@@ -2194,4 +2194,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Package the service, run lint/type/tests in CI without live credentials, and expose health/readiness.
 - Define an OpenAPI contract with stable error codes, retry guidance, streaming semantics, and a generated TypeScript client.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 9.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 9](../chapter-9/dl-pytorch.md).

@@ -205,910 +205,6 @@ Reproducibility checklist:
 
 ---
 
-## 12.3 Configuration, secrets, and startup validation
-
-Environment variables are strings. Parse them at startup and fail with a clear error. Do not scatter `os.getenv()` calls through request handlers.
-
-```python
-import os
-from dataclasses import dataclass, field
-
-
-class ConfigError(ValueError):
-    pass
-
-
-def required(env: dict[str, str], name: str) -> str:
-    value = env.get(name)
-    if value is None or value.strip() == "":
-        raise ConfigError(f"missing required setting: {name}")
-    return value
-
-
-def parse_bool(raw: str) -> bool:
-    normalized = raw.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ConfigError(f"invalid boolean: {raw!r}")
-
-
-@dataclass(frozen=True)
-class Settings:
-    database_url: str
-    port: int
-    request_timeout_s: float
-    shutdown_grace_s: float
-    log_level: str
-    debug: bool
-    api_key: str = field(repr=False)
-
-    @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
-        env = os.environ if env is None else env
-        port = int(required(env, "PORT"))
-        timeout = float(required(env, "REQUEST_TIMEOUT_SECONDS"))
-        grace = float(required(env, "SHUTDOWN_GRACE_SECONDS"))
-        if not 1 <= port <= 65535:
-            raise ConfigError(f"PORT out of range: {port}")
-        if timeout <= 0:
-            raise ConfigError("REQUEST_TIMEOUT_SECONDS must be positive")
-        if grace <= 0:
-            raise ConfigError("SHUTDOWN_GRACE_SECONDS must be positive")
-        return cls(
-            database_url=required(env, "DATABASE_URL"),
-            port=port,
-            request_timeout_s=timeout,
-            shutdown_grace_s=grace,
-            log_level=required(env, "LOG_LEVEL").upper(),
-            debug=parse_bool(required(env, "DEBUG")),
-            api_key=required(env, "API_KEY"),
-        )
-```
-
-`repr=False` prevents the secret from appearing when someone logs the settings object. It does not prevent it from appearing in a custom serializer, a traceback, or an error report. Treat redaction as a separate control.
-
-Define precedence explicitly:
-
-```text
-explicit constructor argument > environment variable > config file > default
-```
-
-Test that precedence. A configuration system with unclear precedence produces incidents that cannot be reproduced.
-
-Safe defaults matter:
-
-- `debug=False` by default.
-- Bind to `0.0.0.0` only inside a container; a laptop should bind to `127.0.0.1`.
-- Never default to a production database URL.
-- Never default a secret to an empty string and continue.
-- Reject unknown environment values that look like booleans instead of treating them as true.
-
-Secrets are not configuration. They should not be baked into images, passed as Docker build arguments, committed to Git, or written to logs. Common sources:
-
-- a secret manager read at startup or by the platform
-- a mounted file with restrictive permissions
-- short-lived credentials issued to the workload identity
-
-Rotation is part of the design. A rotation that requires rebuilding the image is an outage waiting to happen. Prefer providers that refresh credentials, or support two valid keys during a rotation window.
-
-Validate secrets and external dependencies at startup, but distinguish “cannot serve at all” from “degraded.” A missing database URL is a startup failure. A temporarily unavailable recommendation service may be a readiness failure, a degraded mode, or a feature flag.
-
-```python
-def build_settings_or_exit() -> Settings:
-    try:
-        return Settings.from_env()
-    except (ConfigError, ValueError) as exc:
-        raise SystemExit(f"configuration error: {exc}") from exc
-```
-
-`SystemExit` with a non-zero code tells the orchestrator the process failed to configure itself. A traceback without the setting name is not a useful production log.
-
-Configuration is versioned with the deployment. Record a hash of non-secret settings and the names of secret references, not the secret values.
-
----
-
-## 12.4 Containers and process lifecycle
-
-A container is a process with a filesystem, resource limits, and a network namespace. It is not a small virtual machine. Run one concern per container; do not start cron, a queue consumer, and the web server in the same entrypoint.
-
-A multi-stage Dockerfile:
-
-```dockerfile
-FROM python:3.12-slim AS build
-WORKDIR /app
-COPY pyproject.toml uv.lock README.md ./
-COPY src ./src
-RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev
-
-FROM python:3.12-slim AS runtime
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH"
-RUN useradd --create-home --uid 10001 app
-WORKDIR /app
-COPY --from=build /app/.venv /app/.venv
-COPY --from=build /app/src /app/src
-USER app
-EXPOSE 8000
-ENTRYPOINT ["python", "-m", "rag_service"]
-```
-
-This example assumes the application is importable from `/app/src` or installed into the virtual environment by the build step. In a real image, install the wheel into the runtime environment and copy only the installed package, not the source tree.
-
-Why the details matter:
-
-- **Multi-stage:** build tools and caches do not ship in the runtime image.
-- **Non-root:** a compromised process cannot write to most of the filesystem or install packages.
-- **Exec form:** `ENTRYPOINT ["python", ...]` sends signals to Python, not to a shell.
-- **`PYTHONUNBUFFERED=1`:** logs appear immediately instead of sitting in a block buffer.
-- **`PYTHONDONTWRITEBYTECODE=1`:** no `__pycache__` writes in a read-only image.
-- **Pinned base image:** `python:3.12-slim` is a moving tag; pin a digest for reproducibility.
-
-Use a `.dockerignore` that excludes `.git`, `.venv`, tests, caches, local data, and secrets. A file excluded from the build context cannot accidentally leak into a layer.
-
-Image layers are not a secret store. Deleting a file in a later layer does not remove it from the earlier layer. Build arguments are visible in image history. Use runtime secret mounts or a secret manager.
-
-Run with a read-only root filesystem when possible, and mount a writable temporary directory only where needed. Set CPU and memory limits based on measurements, not guesses. A container that is killed for exceeding memory has no chance to drain.
-
-PID 1 has special signal semantics. A Python process can handle `SIGTERM` if it installs a handler, but it may not reap orphaned child processes. Use an init process (`docker run --init`, Kubernetes `shareProcessNamespace` alternatives, or a tiny init) when the container starts subprocesses. For a single ASGI server, installing a signal handler is usually enough.
-
-Workers:
-
-- ASGI workers are separate processes. Each has its own memory, connection pool, and in-process metrics.
-- `2 * CPU + 1` is a starting point for blocking workloads, not a law. Async I/O workloads often need fewer workers and more concurrency inside each worker.
-- More workers increase memory and database connections. Measure both.
-- With multiple workers, in-process counters are not global. Export per-worker metrics or aggregate at the metrics backend.
-
-Never run database migrations from the application entrypoint on every replica. Multiple replicas will race, and a failed migration can leave a crash loop. Use a separate migration job with a lock.
-
----
-
-## 12.5 Health, readiness, and graceful shutdown
-
-Health checks answer different questions:
-
-| Probe | Question | Failure action |
-| --- | --- | --- |
-| Startup | Has initialization finished? | Keep waiting; do not restart immediately |
-| Liveness | Is the process able to make progress? | Restart the container |
-| Readiness | Should this instance receive traffic? | Remove it from the load balancer |
-
-A liveness check must not depend on the database. If the database is down, restarting every application instance will not fix it and may make the outage worse. Check that the event loop is responsive and the process is not deadlocked.
-
-A readiness check can depend on required dependencies, but think about the blast radius. If every instance fails readiness when a shared cache is down, the load balancer removes the entire fleet. Prefer degraded behavior when the dependency is optional.
-
-```python
-from dataclasses import dataclass
-
-
-@dataclass
-class Health:
-    lifecycle: Lifecycle
-    database_ok: bool
-
-    def live(self) -> tuple[int, dict[str, str]]:
-        if self.lifecycle.phase is Phase.STOPPED:
-            return 503, {"status": "stopped"}
-        return 200, {"status": "ok"}
-
-    def ready(self) -> tuple[int, dict[str, str]]:
-        if not self.lifecycle.accepts_traffic:
-            return 503, {"status": self.lifecycle.phase.value}
-        if not self.database_ok:
-            return 503, {"status": "database_unavailable"}
-        return 200, {"status": "ready"}
-```
-
-Do not return stack traces, connection strings, environment variables, or internal hostnames from a health endpoint. Health endpoints are often unauthenticated and reachable from the platform.
-
-Graceful shutdown order:
-
-1. Receive `SIGTERM`.
-2. Mark the instance not ready.
-3. Give the load balancer time to stop sending new requests.
-4. Stop accepting new connections.
-5. Let in-flight requests finish until a deadline.
-6. Cancel remaining work.
-7. Close database connections and flush telemetry.
-8. Exit with status `0`.
-
-```python
-import signal
-import threading
-
-
-class Shutdown:
-    def __init__(self) -> None:
-        self.event = threading.Event()
-
-    def install(self) -> None:
-        signal.signal(signal.SIGTERM, self._handle)
-        signal.signal(signal.SIGINT, self._handle)
-
-    def _handle(self, signum: int, frame: object) -> None:
-        self.event.set()
-
-    def wait(self, timeout: float) -> bool:
-        return self.event.wait(timeout)
-```
-
-The handler should only set a flag. Do not acquire locks, write to the database, or log heavy diagnostics inside a signal handler.
-
-In an asyncio service, use `loop.add_signal_handler` or the server's lifecycle hooks. `asyncio.run()` installs its own `SIGINT` handling; do not fight it with a second handler.
-
-The drain deadline must be shorter than the platform's kill deadline. If the platform sends `SIGKILL` after 30 seconds, your deadline must leave time to close connections and exit. A shutdown that always gets killed is not graceful.
-
-Background tasks need explicit ownership:
-
-- Keep a set of in-flight tasks.
-- Stop accepting new work when draining begins.
-- Await tasks with a timeout.
-- Cancel and await cancellation.
-- Do not fire-and-forget without tracking, or shutdown will race with the event loop closing.
-
-Test shutdown by sending `SIGTERM` during a slow request. The request should finish, the readiness endpoint should fail, and the process should exit before the deadline.
-
----
-
-## 12.6 Structured logging and correlation
-
-Production logs are events, not prose. One JSON object per line to stdout is easy for the platform to collect and query.
-
-```python
-import json
-import logging
-import sys
-from datetime import datetime, timezone
-
-
-class JsonFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        payload = {
-            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "event": getattr(record, "event", record.getMessage()),
-            "message": record.getMessage(),
-            "service": "rag-service",
-        }
-        for key in (
-            "request_id",
-            "trace_id",
-            "tenant_id",
-            "route",
-            "status",
-            "duration_ms",
-            "error_code",
-        ):
-            value = getattr(record, key, None)
-            if value is not None:
-                payload[key] = value
-        if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
-        return json.dumps(payload, ensure_ascii=False, default=str)
-
-
-def configure_logging(level: str) -> None:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
-    root = logging.getLogger()
-    root.handlers[:] = [handler]
-    root.setLevel(level)
-```
-
-Avoid logging the same exception at every layer. Log it once where it is handled, with `exc_info=True`, and return a stable error code to the caller. Re-logging at each layer multiplies volume and hides the original boundary.
-
-Request correlation:
-
-```python
-from contextvars import ContextVar
-from uuid import uuid4
-
-request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
-
-
-def current_request_id() -> str:
-    request_id = request_id_var.get()
-    if request_id is None:
-        request_id = str(uuid4())
-        request_id_var.set(request_id)
-    return request_id
-```
-
-Set the context value in middleware or at the request boundary, and reset it in a `finally` block. Context variables propagate into `asyncio` tasks created from the current context. They do not automatically propagate into new threads; capture the context and run with `contextvars.copy_context().run(...)` if you cross a thread boundary.
-
-Add fields with `extra`, not by interpolating untrusted text into the message:
-
-```python
-logger.info(
-    "request completed",
-    extra={
-        "event": "http.request.completed",
-        "request_id": current_request_id(),
-        "route": "/ask",
-        "status": 200,
-        "duration_ms": 42.5,
-    },
-)
-```
-
-Logging rules:
-
-- Prefer stable event names over free-form messages.
-- Use UTC timestamps in RFC 3339 format.
-- Include service, version, environment, request ID, and trace ID.
-- Hash or omit user identifiers when full values are not needed.
-- Never log secrets, authorization headers, raw prompts, or full request bodies by default.
-- Bound field sizes; a 10 MB log line can break a collector.
-- Do not put unbounded values in indexed fields.
-- Send audit events to an append-only destination separate from debug logs.
-
-Log injection is still possible in structured logs if a field is rendered by a downstream text processor. Validate or escape newlines in values that come from users, and prefer fields over string concatenation.
-
-Log levels are operational controls, not decoration:
-
-- `DEBUG`: development detail, sampled or disabled in production.
-- `INFO`: lifecycle and business events worth retaining.
-- `WARNING`: degraded behavior that still serves traffic.
-- `ERROR`: a request or task failed.
-- `CRITICAL`: the process or a major subsystem cannot continue.
-
-Third-party libraries can be noisy. Set their levels deliberately; do not set the root logger to `DEBUG` because one dependency is hard to debug.
-
-Access logs and application logs are different. The server can log every request line, but business events need semantic fields. If both exist, correlate them with the request ID rather than duplicating the entire request body.
-
-Retention and access:
-
-- Keep hot logs long enough to debug an incident, then archive or delete.
-- Apply the same privacy rules to logs as to the database.
-- Restrict who can query raw logs.
-- Test that redaction works by logging a fake secret and asserting it never appears.
-
----
-
-## 12.7 Metrics and dashboards
-
-Metrics are cheap, aggregated numbers. Choose the type deliberately:
-
-- **Counter:** monotonically increasing total, such as requests, errors, or tokens.
-- **Gauge:** a value that can go up or down, such as in-flight requests, queue depth, or memory.
-- **Histogram:** a distribution, such as request latency or response size.
-
-Counters must never decrease. A process restart resets its in-process counter; the backend handles resets, but application code should not subtract from a counter.
-
-Labels split a metric into series. Keep cardinality bounded:
-
-```text
-route="/ask"             good
-route="/users/12345"     bad: one series per user
-user_id="..."            bad
-status="200"             okay but often status_class is enough
-error="timeout"          good if the set is fixed
-error=str(exc)           bad: unbounded, may contain PII
-```
-
-Use route templates (`/users/{user_id}`), status classes, provider names, model names, and fixed error codes. Do not put raw SQL, URLs, exception messages, trace IDs, or email addresses in labels.
-
-Prometheus text exposition:
-
-```text
-# HELP http_requests_total Total HTTP requests.
-# TYPE http_requests_total counter
-http_requests_total{route="/ask",status_class="2xx"} 42
-
-# HELP http_request_duration_seconds HTTP request latency.
-# TYPE http_request_duration_seconds histogram
-http_request_duration_seconds_bucket{route="/ask",le="0.1"} 10
-http_request_duration_seconds_bucket{route="/ask",le="0.5"} 39
-http_request_duration_seconds_bucket{route="/ask",le="1"} 42
-http_request_duration_seconds_bucket{route="/ask",le="+Inf"} 42
-http_request_duration_seconds_sum{route="/ask"} 8.7
-http_request_duration_seconds_count{route="/ask"} 42
-```
-
-A histogram has cumulative buckets, a sum, and a count. Percentiles computed from buckets are estimates. Do not average percentiles across instances or time windows; aggregate the underlying buckets or use a backend that supports distribution aggregation.
-
-```python
-from dataclasses import dataclass
-
-
-@dataclass
-class Counter:
-    name: str
-    labels: dict[str, str]
-    value: int = 0
-
-    def inc(self, amount: int = 1) -> None:
-        if amount < 0:
-            raise ValueError("counters cannot decrease")
-        self.value += amount
-```
-
-The real implementation needs a lock for threads or an atomic backend. Keep the state in one place and expose a snapshot; do not let request handlers mutate shared dictionaries without synchronization.
-
-Useful metric families:
-
-- **RED:** rate, errors, duration per request-driven service.
-- **USE:** utilization, saturation, errors for resources such as CPU, memory, and queues.
-- **Golden signals:** latency, traffic, errors, saturation.
-- **Business:** requests, documents retrieved, tokens, model cost, conversions.
-
-Instrumentation placement:
-
-- HTTP boundary: count, duration, status class.
-- Dependency call: count, duration, error class, timeout.
-- Queue: depth, age of oldest item, processing rate.
-- Worker: in-flight jobs, successes, failures, retries.
-- Model call: tokens, latency, provider errors, estimated cost.
-
-A dashboard should answer a question. Start with user-visible health: request rate, error rate, latency percentiles, saturation, and dependency health. Add business metrics below. A wall of CPU graphs is not a dashboard.
-
-Alerts should be symptom-based and actionable. “CPU is 80%” is a cause; “p99 latency exceeded the SLO for ten minutes” is a symptom users feel. Page only when a human must act now. Send the rest to a ticket or a daily review.
-
-Every alert should include:
-
-- what is broken
-- the affected service and environment
-- the current value and threshold
-- the window
-- a link to a dashboard and a runbook
-- the expected action
-
----
-
-## 12.8 Tracing and error tracking
-
-A trace is a tree of timed spans for one request or job. Every span has a trace ID, a span ID, a parent, a name, a start and end time, a status, and attributes.
-
-```text
-trace 4bf92f...
-├── POST /ask              120 ms
-│   ├── auth.verify         8 ms
-│   ├── retrieve           45 ms
-│   │   └── vector.search  40 ms
-│   └── llm.generate       60 ms
-```
-
-Instrument boundaries, not every function. Inbound HTTP, outbound HTTP, database calls, cache calls, queue publish/consume, and model calls are enough to find most latency.
-
-Propagation uses headers. The W3C `traceparent` header looks like:
-
-```text
-00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
-```
-
-The fields are version, trace ID, parent span ID, and flags. If you call another service, forward the header or use the client library's instrumentation. A trace that stops at your service boundary cannot explain the user's latency.
-
-A minimal in-process span:
-
-```python
-from collections.abc import Iterator
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass, field
-from time import perf_counter_ns
-from uuid import uuid4
-
-current_span: ContextVar["Span | None"] = ContextVar("current_span", default=None)
-
-
-@dataclass
-class Span:
-    name: str
-    trace_id: str
-    span_id: str
-    parent_id: str | None
-    start_ns: int
-    end_ns: int | None = None
-    status: str = "ok"
-    attributes: dict[str, object] = field(default_factory=dict)
-
-
-@contextmanager
-def start_span(name: str, **attributes: object) -> Iterator[Span]:
-    parent = current_span.get()
-    span = Span(
-        name=name,
-        trace_id=parent.trace_id if parent else uuid4().hex,
-        span_id=uuid4().hex[:16],
-        parent_id=parent.span_id if parent else None,
-        start_ns=perf_counter_ns(),
-        attributes=dict(attributes),
-    )
-    token = current_span.set(span)
-    try:
-        yield span
-    except Exception as exc:
-        span.status = "error"
-        span.attributes["exception.type"] = type(exc).__name__
-        raise
-    finally:
-        span.end_ns = perf_counter_ns()
-        current_span.reset(token)
-```
-
-Creating a child span reads the current context, copies the trace ID, and sets the parent. Resetting the context in `finally` prevents a span from leaking into the next task. The exporter is deliberately omitted; production code should batch and drop spans rather than block a request on a tracing backend.
-
-Sampling:
-
-- **Head sampling** decides at the start of a trace. It is cheap but may miss rare errors.
-- **Tail sampling** buffers a trace and decides after seeing the whole trace. It can keep errors and slow requests, but costs memory.
-- Sample rates should be recorded so counts can be adjusted.
-- Always consider sampling errors, or use a separate error tracker.
-
-Never put raw prompts, tokens, credentials, or personal data in span attributes. Use allowlisted metadata: route, status, model name, token counts, cache hit, retrieval count.
-
-Error tracking is not the same as logging. It groups repeated exceptions and preserves enough context to fix them:
-
-- exception type and normalized stack
-- release/version and environment
-- request ID and trace ID
-- route or job name
-- breadcrumbs of recent events
-- affected user count, without storing unnecessary PII
-
-Group by a fingerprint that ignores volatile values such as IDs and timestamps. A new release can create a new fingerprint; record the release so you can distinguish a regression from a long-standing issue.
-
-Deduplicate alerts. One broken dependency can produce thousands of identical errors; page on the aggregate, not each occurrence.
-
----
-
-## 12.9 SLOs, alerting, and incident response
-
-An SLI is a measurement. An SLO is a target for that measurement. An error budget is how much failure the target allows.
-
-Examples:
-
-```text
-availability SLI = successful requests / valid requests
-latency SLI     = requests faster than 300 ms / valid requests
-freshness SLI   = pipeline outputs newer than 15 minutes / checks
-```
-
-Choose a window and a target:
-
-```text
-99.9% of valid requests succeed over 30 days
-95% of requests complete in under 300 ms over 30 days
-```
-
-Error budget:
-
-```python
-def error_budget(total_events: int, slo: float) -> float:
-    return total_events * (1 - slo)
-
-
-def burn_rate(bad_events: int, total_events: int, slo: float) -> float:
-    if total_events == 0:
-        return 0.0
-    allowed_bad_rate = 1 - slo
-    observed_bad_rate = bad_events / total_events
-    return observed_bad_rate / allowed_bad_rate
-```
-
-If your SLO is 99.9% and 0.5% of requests are failing, the burn rate is 5: you are consuming the 30-day budget five times too fast. A burn rate of 1 exactly exhausts the budget over the window.
-
-Multi-window alerting reduces both false pages and missed incidents:
-
-- Fast burn: a high burn rate over a short window pages immediately.
-- Slow burn: a moderate burn rate over a longer window creates a ticket.
-- Require the condition to hold in both a short and a long window before paging.
-
-The exact thresholds are policy choices. The important part is that alerts are tied to user-visible objectives and have a runbook.
-
-Page versus ticket:
-
-- **Page:** the SLO is at risk now; a human must act.
-- **Ticket:** a trend will breach the SLO if ignored.
-- **Dashboard only:** useful context, no action required.
-
-Incident response:
-
-1. Detect and acknowledge.
-2. Assess customer impact and severity.
-3. Assign an incident commander and a communications owner.
-4. Mitigate first: roll back, disable a flag, shed load, fail over.
-5. Keep a timeline of decisions and timestamps.
-6. Resolve and verify with the SLI.
-7. Hold a blameless postmortem with action items, owners, and dates.
-
-Mitigation is not root-cause analysis. Restoring service comes first. A rollback is a valid fix even before you understand the bug.
-
-Runbooks should be short and executable:
-
-```text
-Symptom: /ask p99 latency above SLO for 10 minutes
-Check: dashboard link, recent deploys, provider status, database latency
-Mitigate: roll back previous image; disable reranking flag; increase timeout budget
-Verify: error rate and p99 return below threshold for 15 minutes
-Escalate: platform on-call if database saturation is the cause
-```
-
-A runbook that says “investigate” is not a runbook. Include commands, dashboards, expected outputs, and rollback steps.
-
----
-
-## 12.10 Performance, load, and capacity
-
-Latency is a distribution. Report percentiles, not only the mean:
-
-```python
-from math import ceil
-
-
-def percentile(values: list[float], p: float) -> float:
-    if not values:
-        raise ValueError("empty sample")
-    if not 0 < p <= 1:
-        raise ValueError("p must be in (0, 1]")
-    ordered = sorted(values)
-    rank = ceil(p * len(ordered))
-    return ordered[rank - 1]
-```
-
-This is the nearest-rank definition. Different libraries use interpolation; state which one you use. A p95 of 200 ms means 95% of observed requests were at or below 200 ms, not that the average user sees 200 ms.
-
-Little's law relates concurrency, throughput, and latency:
-
-```text
-in-flight requests = throughput × latency
-```
-
-At 50 requests per second and 200 ms average latency, about 10 requests are in flight. If your connection pool has 5 connections, requests queue. This is a capacity bug, not a code-style issue.
-
-Queueing is nonlinear. At 50% utilization, queues are short; at 90%, latency rises sharply; at 100%, it grows without bound. Keep headroom for bursts and dependency slowdowns.
-
-A load test must define:
-
-- the target SLO and workload mix
-- request rate and concurrency model
-- realistic payload sizes, auth, and cache behavior
-- warmup and steady-state duration
-- stop conditions and safety limits
-- the environment and data isolation
-
-Test stages:
-
-1. Baseline at low rate.
-2. Ramp until the SLO breaks or saturation appears.
-3. Hold at expected peak.
-4. Spike briefly.
-5. Soak for hours to find leaks.
-
-Measure both client and server:
-
-- p50, p95, p99 latency
-- throughput and error rate
-- CPU, memory, file descriptors
-- connection pool usage and queue depth
-- dependency latency and error rate
-- garbage collection pauses if relevant
-
-Averages hide tail latency. A load test that only reports mean latency can pass while real users time out.
-
-Profiling:
-
-```python
-import cProfile
-import pstats
-
-
-def profile_me() -> None:
-    with cProfile.Profile() as profiler:
-        run_workload()
-    pstats.Stats(profiler).sort_stats("cumulative").print_stats(20)
-```
-
-Use `time.perf_counter()` for elapsed time; it is monotonic. `time.time()` can jump when the system clock changes.
-
-Memory:
-
-```python
-import tracemalloc
-
-tracemalloc.start()
-run_workload()
-snapshot = tracemalloc.take_snapshot()
-for stat in snapshot.statistics("lineno")[:10]:
-    print(stat)
-```
-
-Common production performance bugs:
-
-- a blocking call inside an async request handler
-- a synchronous database driver in an async service
-- unbounded `asyncio.create_task` calls
-- a connection pool smaller than the concurrency
-- retries without a budget or jitter
-- a timeout longer than the caller's timeout
-- CPU-bound work in the event loop
-- per-request client construction instead of reuse
-- logging large payloads on the hot path
-
-Capacity:
-
-- Measure memory per worker and per connection.
-- Autoscale on queue depth or concurrency, not only CPU.
-- Scale dependencies too; the database is often the bottleneck.
-- Keep headroom for one instance failure.
-- Test the failure of one replica, not only steady-state load.
-
----
-
-## 12.11 CI/CD, migrations, and progressive delivery
-
-A release pipeline should be boring and repeatable:
-
-```text
-lint → typecheck → unit tests → integration tests
-     → build artifact once → scan → sign → SBOM
-     → deploy staging → smoke tests → canary
-     → promote or roll back
-```
-
-Use the same Python version and lock file in CI and production. A test that passes on 3.13 while production runs 3.12 is not evidence.
-
-A GitHub Actions sketch:
-
-```yaml
-name: release
-on:
-  push:
-    tags: ["v*"]
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install uv
-      - run: uv sync --frozen
-      - run: uv run pytest
-      - run: uv run ruff check .
-      - run: uv run mypy src
-      - run: docker build -t "$IMAGE:$GITHUB_SHA" .
-```
-
-Pin actions to a commit SHA in a high-security environment; tags can move. Use short-lived workload identity instead of long-lived cloud keys. Keep production credentials out of pull-request workflows.
-
-Artifact promotion:
-
-- Build once per commit.
-- Tag with the commit SHA and a semantic version.
-- Deploy the same digest to staging and production.
-- Record the digest, commit, migration version, and configuration hash in the release record.
-- Never deploy from a developer laptop as the normal path.
-
-Database migrations are the riskiest part of many deployments. Use expand/contract:
-
-1. **Expand:** add a nullable column, new table, or new index.
-2. **Deploy:** code writes both old and new forms and reads the old form.
-3. **Backfill:** populate the new form in batches.
-4. **Switch:** code reads the new form.
-5. **Contract:** remove the old column or table after no deployed code uses it.
-
-This allows old and new application versions to coexist during a rolling deploy. A destructive migration in the same release as a code change makes rollback unsafe.
-
-Migrations should:
-
-- run in a separate job, not in every web replica
-- take a lock so two jobs cannot race
-- be idempotent or tracked
-- be tested against production-sized data
-- have a backup or a forward-fix plan
-- have a timeout and a rollback/abort strategy
-
-Some migrations cannot be rolled back safely. Prefer additive changes and forward fixes.
-
-Progressive delivery:
-
-- **Canary:** send a small percentage of traffic to the new version; compare error rate, latency, and business metrics with the baseline; promote or roll back automatically.
-- **Blue-green:** run two environments, warm the new one, switch traffic, keep the old one for rollback.
-- **Feature flag:** deploy code dark and release behavior separately; provide a kill switch; assign an owner and an expiry date.
-
-A canary without a comparison is just a slow full deploy. Define the metrics and the rollback threshold before starting.
-
-Rollback checklist:
-
-- previous image digest is known
-- schema is backward compatible
-- feature flag can disable the new path
-- caches and queues can handle the old version
-- rollback is tested, not assumed
-- the on-call engineer knows how to verify recovery
-
-Smoke tests after deployment:
-
-- health and readiness return success
-- one authenticated request succeeds
-- one dependency call succeeds
-- one background job processes a test message
-- version and commit are the expected values
-
----
-
-## 12.12 Security, cost, and common mistakes
-
-Deployment security is mostly about reducing blast radius:
-
-- run as non-root with a read-only filesystem
-- grant the workload only the permissions it needs
-- restrict network egress to known dependencies
-- terminate TLS at the edge and use secure headers
-- authenticate and authorize every business endpoint
-- rate-limit expensive endpoints
-- keep health and metrics endpoints internal
-- pin and scan dependencies and images
-- generate an SBOM and sign the image
-- rotate secrets and audit access
-
-Supply chain:
-
-- commit the lock file
-- verify hashes where the package manager supports it
-- review new dependencies and their licenses
-- scan images for known vulnerabilities
-- rebuild regularly to pick up base-image patches
-- do not run arbitrary install scripts from untrusted sources in production builds
-
-Observability data is production data. It can contain prompts, headers, user IDs, and database queries. Apply retention, access control, and redaction to logs, metrics, traces, and error reports. Do not assume a tracing backend is exempt because it is “only for debugging.”
-
-Cost drivers:
-
-- idle replicas and over-provisioned CPU or memory
-- high-cardinality metrics
-- verbose logs and long retention
-- unsampled traces
-- cross-region or egress traffic
-- external model calls and retries
-- storage of raw payloads that no one reads
-
-Track cost per request, per tenant, or per model call when the business depends on it. A cost dashboard without an owner becomes noise.
-
-Common deployment and observability mistakes:
-
-- liveness checks that depend on the database
-- readiness that stays true during shutdown
-- no drain window before the load balancer stops sending traffic
-- logs without request IDs
-- exceptions logged at every layer
-- metrics with user IDs or raw URLs as labels
-- alerting on CPU instead of user-visible symptoms
-- averaging latency percentiles
-- secrets in build arguments or image layers
-- mutable `latest` tags
-- migrations running from every replica
-- retries without jitter or a budget
-- deploying and releasing at the same time with no rollback
-- dashboards and alerts with no owner
-- observability data that ignores privacy requirements
-
-A final operational checklist:
-
-- Can you identify the deployed commit and artifact digest?
-- Can you tell whether the instance is ready without reading logs?
-- Does a slow request finish during shutdown?
-- Can you trace one request across the service boundary?
-- Do you know the SLO and the current error budget?
-- Does every page have a runbook?
-- Can you roll back without a database restore?
-- Are secrets absent from images, logs, and traces?
-- Does the load test reflect the real workload?
-- Is someone accountable for each dashboard and alert?
-
----
-
 ## Exercises
 
 The exercises are grouped by deployment and observability skill. Groups A–D build the runtime and lifecycle, E–G build logs, metrics, and traces, H–I cover reliability and performance, and J integrates deployment, security, and a capstone.
@@ -1319,6 +415,110 @@ Answer:
 
 ---
 
+## 12.3 Configuration, secrets, and startup validation
+
+Environment variables are strings. Parse them at startup and fail with a clear error. Do not scatter `os.getenv()` calls through request handlers.
+
+```python
+import os
+from dataclasses import dataclass, field
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def required(env: dict[str, str], name: str) -> str:
+    value = env.get(name)
+    if value is None or value.strip() == "":
+        raise ConfigError(f"missing required setting: {name}")
+    return value
+
+
+def parse_bool(raw: str) -> bool:
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(f"invalid boolean: {raw!r}")
+
+
+@dataclass(frozen=True)
+class Settings:
+    database_url: str
+    port: int
+    request_timeout_s: float
+    shutdown_grace_s: float
+    log_level: str
+    debug: bool
+    api_key: str = field(repr=False)
+
+    @classmethod
+    def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
+        env = os.environ if env is None else env
+        port = int(required(env, "PORT"))
+        timeout = float(required(env, "REQUEST_TIMEOUT_SECONDS"))
+        grace = float(required(env, "SHUTDOWN_GRACE_SECONDS"))
+        if not 1 <= port <= 65535:
+            raise ConfigError(f"PORT out of range: {port}")
+        if timeout <= 0:
+            raise ConfigError("REQUEST_TIMEOUT_SECONDS must be positive")
+        if grace <= 0:
+            raise ConfigError("SHUTDOWN_GRACE_SECONDS must be positive")
+        return cls(
+            database_url=required(env, "DATABASE_URL"),
+            port=port,
+            request_timeout_s=timeout,
+            shutdown_grace_s=grace,
+            log_level=required(env, "LOG_LEVEL").upper(),
+            debug=parse_bool(required(env, "DEBUG")),
+            api_key=required(env, "API_KEY"),
+        )
+```
+
+`repr=False` prevents the secret from appearing when someone logs the settings object. It does not prevent it from appearing in a custom serializer, a traceback, or an error report. Treat redaction as a separate control.
+
+Define precedence explicitly:
+
+```text
+explicit constructor argument > environment variable > config file > default
+```
+
+Test that precedence. A configuration system with unclear precedence produces incidents that cannot be reproduced.
+
+Safe defaults matter:
+
+- `debug=False` by default.
+- Bind to `0.0.0.0` only inside a container; a laptop should bind to `127.0.0.1`.
+- Never default to a production database URL.
+- Never default a secret to an empty string and continue.
+- Reject unknown environment values that look like booleans instead of treating them as true.
+
+Secrets are not configuration. They should not be baked into images, passed as Docker build arguments, committed to Git, or written to logs. Common sources:
+
+- a secret manager read at startup or by the platform
+- a mounted file with restrictive permissions
+- short-lived credentials issued to the workload identity
+
+Rotation is part of the design. A rotation that requires rebuilding the image is an outage waiting to happen. Prefer providers that refresh credentials, or support two valid keys during a rotation window.
+
+Validate secrets and external dependencies at startup, but distinguish “cannot serve at all” from “degraded.” A missing database URL is a startup failure. A temporarily unavailable recommendation service may be a readiness failure, a degraded mode, or a feature flag.
+
+```python
+def build_settings_or_exit() -> Settings:
+    try:
+        return Settings.from_env()
+    except (ConfigError, ValueError) as exc:
+        raise SystemExit(f"configuration error: {exc}") from exc
+```
+
+`SystemExit` with a non-zero code tells the orchestrator the process failed to configure itself. A traceback without the setting name is not a useful production log.
+
+Configuration is versioned with the deployment. Record a hash of non-secret settings and the names of secret references, not the secret values.
+
+---
+
 ## Group B — Configuration, secrets, and startup validation
 
 **B1.** A service reads `PORT` from the environment:
@@ -1504,6 +704,62 @@ Answer:
 
 ---
 
+## 12.4 Containers and process lifecycle
+
+A container is a process with a filesystem, resource limits, and a network namespace. It is not a small virtual machine. Run one concern per container; do not start cron, a queue consumer, and the web server in the same entrypoint.
+
+A multi-stage Dockerfile:
+
+```dockerfile
+FROM python:3.12-slim AS build
+WORKDIR /app
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev
+
+FROM python:3.12-slim AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
+RUN useradd --create-home --uid 10001 app
+WORKDIR /app
+COPY --from=build /app/.venv /app/.venv
+COPY --from=build /app/src /app/src
+USER app
+EXPOSE 8000
+ENTRYPOINT ["python", "-m", "rag_service"]
+```
+
+This example assumes the application is importable from `/app/src` or installed into the virtual environment by the build step. In a real image, install the wheel into the runtime environment and copy only the installed package, not the source tree.
+
+Why the details matter:
+
+- **Multi-stage:** build tools and caches do not ship in the runtime image.
+- **Non-root:** a compromised process cannot write to most of the filesystem or install packages.
+- **Exec form:** `ENTRYPOINT ["python", ...]` sends signals to Python, not to a shell.
+- **`PYTHONUNBUFFERED=1`:** logs appear immediately instead of sitting in a block buffer.
+- **`PYTHONDONTWRITEBYTECODE=1`:** no `__pycache__` writes in a read-only image.
+- **Pinned base image:** `python:3.12-slim` is a moving tag; pin a digest for reproducibility.
+
+Use a `.dockerignore` that excludes `.git`, `.venv`, tests, caches, local data, and secrets. A file excluded from the build context cannot accidentally leak into a layer.
+
+Image layers are not a secret store. Deleting a file in a later layer does not remove it from the earlier layer. Build arguments are visible in image history. Use runtime secret mounts or a secret manager.
+
+Run with a read-only root filesystem when possible, and mount a writable temporary directory only where needed. Set CPU and memory limits based on measurements, not guesses. A container that is killed for exceeding memory has no chance to drain.
+
+PID 1 has special signal semantics. A Python process can handle `SIGTERM` if it installs a handler, but it may not reap orphaned child processes. Use an init process (`docker run --init`, Kubernetes `shareProcessNamespace` alternatives, or a tiny init) when the container starts subprocesses. For a single ASGI server, installing a signal handler is usually enough.
+
+Workers:
+
+- ASGI workers are separate processes. Each has its own memory, connection pool, and in-process metrics.
+- `2 * CPU + 1` is a starting point for blocking workloads, not a law. Async I/O workloads often need fewer workers and more concurrency inside each worker.
+- More workers increase memory and database connections. Measure both.
+- With multiple workers, in-process counters are not global. Export per-worker metrics or aggregate at the metrics backend.
+
+Never run database migrations from the application entrypoint on every replica. Multiple replicas will race, and a failed migration can leave a crash loop. Use a separate migration job with a lock.
+
+---
+
 ## Group C — Containers and process lifecycle
 
 **C1.** A Dockerfile copies `pyproject.toml` and installs dependencies before copying source. Answer:
@@ -1683,6 +939,93 @@ Answer:
 
 ---
 
+## 12.5 Health, readiness, and graceful shutdown
+
+Health checks answer different questions:
+
+| Probe | Question | Failure action |
+| --- | --- | --- |
+| Startup | Has initialization finished? | Keep waiting; do not restart immediately |
+| Liveness | Is the process able to make progress? | Restart the container |
+| Readiness | Should this instance receive traffic? | Remove it from the load balancer |
+
+A liveness check must not depend on the database. If the database is down, restarting every application instance will not fix it and may make the outage worse. Check that the event loop is responsive and the process is not deadlocked.
+
+A readiness check can depend on required dependencies, but think about the blast radius. If every instance fails readiness when a shared cache is down, the load balancer removes the entire fleet. Prefer degraded behavior when the dependency is optional.
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class Health:
+    lifecycle: Lifecycle
+    database_ok: bool
+
+    def live(self) -> tuple[int, dict[str, str]]:
+        if self.lifecycle.phase is Phase.STOPPED:
+            return 503, {"status": "stopped"}
+        return 200, {"status": "ok"}
+
+    def ready(self) -> tuple[int, dict[str, str]]:
+        if not self.lifecycle.accepts_traffic:
+            return 503, {"status": self.lifecycle.phase.value}
+        if not self.database_ok:
+            return 503, {"status": "database_unavailable"}
+        return 200, {"status": "ready"}
+```
+
+Do not return stack traces, connection strings, environment variables, or internal hostnames from a health endpoint. Health endpoints are often unauthenticated and reachable from the platform.
+
+Graceful shutdown order:
+
+1. Receive `SIGTERM`.
+2. Mark the instance not ready.
+3. Give the load balancer time to stop sending new requests.
+4. Stop accepting new connections.
+5. Let in-flight requests finish until a deadline.
+6. Cancel remaining work.
+7. Close database connections and flush telemetry.
+8. Exit with status `0`.
+
+```python
+import signal
+import threading
+
+
+class Shutdown:
+    def __init__(self) -> None:
+        self.event = threading.Event()
+
+    def install(self) -> None:
+        signal.signal(signal.SIGTERM, self._handle)
+        signal.signal(signal.SIGINT, self._handle)
+
+    def _handle(self, signum: int, frame: object) -> None:
+        self.event.set()
+
+    def wait(self, timeout: float) -> bool:
+        return self.event.wait(timeout)
+```
+
+The handler should only set a flag. Do not acquire locks, write to the database, or log heavy diagnostics inside a signal handler.
+
+In an asyncio service, use `loop.add_signal_handler` or the server's lifecycle hooks. `asyncio.run()` installs its own `SIGINT` handling; do not fight it with a second handler.
+
+The drain deadline must be shorter than the platform's kill deadline. If the platform sends `SIGKILL` after 30 seconds, your deadline must leave time to close connections and exit. A shutdown that always gets killed is not graceful.
+
+Background tasks need explicit ownership:
+
+- Keep a set of in-flight tasks.
+- Stop accepting new work when draining begins.
+- Await tasks with a timeout.
+- Cancel and await cancellation.
+- Do not fire-and-forget without tracking, or shutdown will race with the event loop closing.
+
+Test shutdown by sending `SIGTERM` during a slow request. The request should finish, the readiness endpoint should fail, and the process should exit before the deadline.
+
+---
+
 ## Group D — Health, readiness, and graceful shutdown
 
 **D1.** A liveness probe checks `/readyz`, which queries the database. Answer:
@@ -1853,6 +1196,122 @@ Answer:
 2. How do you send the signal?
 3. How do you bound the test duration?
 4. What should the readiness endpoint return during the test?
+
+## 12.6 Structured logging and correlation
+
+Production logs are events, not prose. One JSON object per line to stdout is easy for the platform to collect and query.
+
+```python
+import json
+import logging
+import sys
+from datetime import datetime, timezone
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "event": getattr(record, "event", record.getMessage()),
+            "message": record.getMessage(),
+            "service": "rag-service",
+        }
+        for key in (
+            "request_id",
+            "trace_id",
+            "tenant_id",
+            "route",
+            "status",
+            "duration_ms",
+            "error_code",
+        ):
+            value = getattr(record, key, None)
+            if value is not None:
+                payload[key] = value
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def configure_logging(level: str) -> None:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JsonFormatter())
+    root = logging.getLogger()
+    root.handlers[:] = [handler]
+    root.setLevel(level)
+```
+
+Avoid logging the same exception at every layer. Log it once where it is handled, with `exc_info=True`, and return a stable error code to the caller. Re-logging at each layer multiplies volume and hides the original boundary.
+
+Request correlation:
+
+```python
+from contextvars import ContextVar
+from uuid import uuid4
+
+request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
+
+
+def current_request_id() -> str:
+    request_id = request_id_var.get()
+    if request_id is None:
+        request_id = str(uuid4())
+        request_id_var.set(request_id)
+    return request_id
+```
+
+Set the context value in middleware or at the request boundary, and reset it in a `finally` block. Context variables propagate into `asyncio` tasks created from the current context. They do not automatically propagate into new threads; capture the context and run with `contextvars.copy_context().run(...)` if you cross a thread boundary.
+
+Add fields with `extra`, not by interpolating untrusted text into the message:
+
+```python
+logger.info(
+    "request completed",
+    extra={
+        "event": "http.request.completed",
+        "request_id": current_request_id(),
+        "route": "/ask",
+        "status": 200,
+        "duration_ms": 42.5,
+    },
+)
+```
+
+Logging rules:
+
+- Prefer stable event names over free-form messages.
+- Use UTC timestamps in RFC 3339 format.
+- Include service, version, environment, request ID, and trace ID.
+- Hash or omit user identifiers when full values are not needed.
+- Never log secrets, authorization headers, raw prompts, or full request bodies by default.
+- Bound field sizes; a 10 MB log line can break a collector.
+- Do not put unbounded values in indexed fields.
+- Send audit events to an append-only destination separate from debug logs.
+
+Log injection is still possible in structured logs if a field is rendered by a downstream text processor. Validate or escape newlines in values that come from users, and prefer fields over string concatenation.
+
+Log levels are operational controls, not decoration:
+
+- `DEBUG`: development detail, sampled or disabled in production.
+- `INFO`: lifecycle and business events worth retaining.
+- `WARNING`: degraded behavior that still serves traffic.
+- `ERROR`: a request or task failed.
+- `CRITICAL`: the process or a major subsystem cannot continue.
+
+Third-party libraries can be noisy. Set their levels deliberately; do not set the root logger to `DEBUG` because one dependency is hard to debug.
+
+Access logs and application logs are different. The server can log every request line, but business events need semantic fields. If both exist, correlate them with the request ID rather than duplicating the entire request body.
+
+Retention and access:
+
+- Keep hot logs long enough to debug an incident, then archive or delete.
+- Apply the same privacy rules to logs as to the database.
+- Restrict who can query raw logs.
+- Test that redaction works by logging a fake secret and asserting it never appears.
+
+---
 
 ## Group E — Structured logging and correlation
 
@@ -2067,6 +1526,96 @@ Then answer what happens if the client sends a very long request ID.
 2. Which formatter do you exercise?
 3. What should the test do with the handler afterward?
 4. Why should the fake secret look realistic?
+## 12.7 Metrics and dashboards
+
+Metrics are cheap, aggregated numbers. Choose the type deliberately:
+
+- **Counter:** monotonically increasing total, such as requests, errors, or tokens.
+- **Gauge:** a value that can go up or down, such as in-flight requests, queue depth, or memory.
+- **Histogram:** a distribution, such as request latency or response size.
+
+Counters must never decrease. A process restart resets its in-process counter; the backend handles resets, but application code should not subtract from a counter.
+
+Labels split a metric into series. Keep cardinality bounded:
+
+```text
+route="/ask"             good
+route="/users/12345"     bad: one series per user
+user_id="..."            bad
+status="200"             okay but often status_class is enough
+error="timeout"          good if the set is fixed
+error=str(exc)           bad: unbounded, may contain PII
+```
+
+Use route templates (`/users/{user_id}`), status classes, provider names, model names, and fixed error codes. Do not put raw SQL, URLs, exception messages, trace IDs, or email addresses in labels.
+
+Prometheus text exposition:
+
+```text
+# HELP http_requests_total Total HTTP requests.
+# TYPE http_requests_total counter
+http_requests_total{route="/ask",status_class="2xx"} 42
+
+# HELP http_request_duration_seconds HTTP request latency.
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{route="/ask",le="0.1"} 10
+http_request_duration_seconds_bucket{route="/ask",le="0.5"} 39
+http_request_duration_seconds_bucket{route="/ask",le="1"} 42
+http_request_duration_seconds_bucket{route="/ask",le="+Inf"} 42
+http_request_duration_seconds_sum{route="/ask"} 8.7
+http_request_duration_seconds_count{route="/ask"} 42
+```
+
+A histogram has cumulative buckets, a sum, and a count. Percentiles computed from buckets are estimates. Do not average percentiles across instances or time windows; aggregate the underlying buckets or use a backend that supports distribution aggregation.
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class Counter:
+    name: str
+    labels: dict[str, str]
+    value: int = 0
+
+    def inc(self, amount: int = 1) -> None:
+        if amount < 0:
+            raise ValueError("counters cannot decrease")
+        self.value += amount
+```
+
+The real implementation needs a lock for threads or an atomic backend. Keep the state in one place and expose a snapshot; do not let request handlers mutate shared dictionaries without synchronization.
+
+Useful metric families:
+
+- **RED:** rate, errors, duration per request-driven service.
+- **USE:** utilization, saturation, errors for resources such as CPU, memory, and queues.
+- **Golden signals:** latency, traffic, errors, saturation.
+- **Business:** requests, documents retrieved, tokens, model cost, conversions.
+
+Instrumentation placement:
+
+- HTTP boundary: count, duration, status class.
+- Dependency call: count, duration, error class, timeout.
+- Queue: depth, age of oldest item, processing rate.
+- Worker: in-flight jobs, successes, failures, retries.
+- Model call: tokens, latency, provider errors, estimated cost.
+
+A dashboard should answer a question. Start with user-visible health: request rate, error rate, latency percentiles, saturation, and dependency health. Add business metrics below. A wall of CPU graphs is not a dashboard.
+
+Alerts should be symptom-based and actionable. “CPU is 80%” is a cause; “p99 latency exceeded the SLO for ten minutes” is a symptom users feel. Page only when a human must act now. Send the rest to a ticket or a daily review.
+
+Every alert should include:
+
+- what is broken
+- the affected service and environment
+- the current value and threshold
+- the window
+- a link to a dashboard and a runbook
+- the expected action
+
+---
+
 ## Group F — Metrics and dashboards
 
 **F1.** Classify each metric as counter, gauge, or histogram: total requests, current in-flight requests, request latency, queue depth, bytes sent, response size, active workers, failed jobs. Explain each choice.
@@ -2233,6 +1782,103 @@ Answer:
 2. Which can be bounded?
 3. What should replace the error message?
 4. How do you detect label explosion before it reaches production?
+
+---
+
+## 12.8 Tracing and error tracking
+
+A trace is a tree of timed spans for one request or job. Every span has a trace ID, a span ID, a parent, a name, a start and end time, a status, and attributes.
+
+```text
+trace 4bf92f...
+├── POST /ask              120 ms
+│   ├── auth.verify         8 ms
+│   ├── retrieve           45 ms
+│   │   └── vector.search  40 ms
+│   └── llm.generate       60 ms
+```
+
+Instrument boundaries, not every function. Inbound HTTP, outbound HTTP, database calls, cache calls, queue publish/consume, and model calls are enough to find most latency.
+
+Propagation uses headers. The W3C `traceparent` header looks like:
+
+```text
+00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+The fields are version, trace ID, parent span ID, and flags. If you call another service, forward the header or use the client library's instrumentation. A trace that stops at your service boundary cannot explain the user's latency.
+
+A minimal in-process span:
+
+```python
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from time import perf_counter_ns
+from uuid import uuid4
+
+current_span: ContextVar["Span | None"] = ContextVar("current_span", default=None)
+
+
+@dataclass
+class Span:
+    name: str
+    trace_id: str
+    span_id: str
+    parent_id: str | None
+    start_ns: int
+    end_ns: int | None = None
+    status: str = "ok"
+    attributes: dict[str, object] = field(default_factory=dict)
+
+
+@contextmanager
+def start_span(name: str, **attributes: object) -> Iterator[Span]:
+    parent = current_span.get()
+    span = Span(
+        name=name,
+        trace_id=parent.trace_id if parent else uuid4().hex,
+        span_id=uuid4().hex[:16],
+        parent_id=parent.span_id if parent else None,
+        start_ns=perf_counter_ns(),
+        attributes=dict(attributes),
+    )
+    token = current_span.set(span)
+    try:
+        yield span
+    except Exception as exc:
+        span.status = "error"
+        span.attributes["exception.type"] = type(exc).__name__
+        raise
+    finally:
+        span.end_ns = perf_counter_ns()
+        current_span.reset(token)
+```
+
+Creating a child span reads the current context, copies the trace ID, and sets the parent. Resetting the context in `finally` prevents a span from leaking into the next task. The exporter is deliberately omitted; production code should batch and drop spans rather than block a request on a tracing backend.
+
+Sampling:
+
+- **Head sampling** decides at the start of a trace. It is cheap but may miss rare errors.
+- **Tail sampling** buffers a trace and decides after seeing the whole trace. It can keep errors and slow requests, but costs memory.
+- Sample rates should be recorded so counts can be adjusted.
+- Always consider sampling errors, or use a separate error tracker.
+
+Never put raw prompts, tokens, credentials, or personal data in span attributes. Use allowlisted metadata: route, status, model name, token counts, cache hit, retrieval count.
+
+Error tracking is not the same as logging. It groups repeated exceptions and preserves enough context to fix them:
+
+- exception type and normalized stack
+- release/version and environment
+- request ID and trace ID
+- route or job name
+- breadcrumbs of recent events
+- affected user count, without storing unnecessary PII
+
+Group by a fingerprint that ignores volatile values such as IDs and timestamps. A new release can create a new fingerprint; record the release so you can distinguish a regression from a long-standing issue.
+
+Deduplicate alerts. One broken dependency can produce thousands of identical errors; page on the aggregate, not each occurrence.
 
 ---
 
@@ -2414,6 +2060,82 @@ Answer:
 
 ---
 
+## 12.9 SLOs, alerting, and incident response
+
+An SLI is a measurement. An SLO is a target for that measurement. An error budget is how much failure the target allows.
+
+Examples:
+
+```text
+availability SLI = successful requests / valid requests
+latency SLI     = requests faster than 300 ms / valid requests
+freshness SLI   = pipeline outputs newer than 15 minutes / checks
+```
+
+Choose a window and a target:
+
+```text
+99.9% of valid requests succeed over 30 days
+95% of requests complete in under 300 ms over 30 days
+```
+
+Error budget:
+
+```python
+def error_budget(total_events: int, slo: float) -> float:
+    return total_events * (1 - slo)
+
+
+def burn_rate(bad_events: int, total_events: int, slo: float) -> float:
+    if total_events == 0:
+        return 0.0
+    allowed_bad_rate = 1 - slo
+    observed_bad_rate = bad_events / total_events
+    return observed_bad_rate / allowed_bad_rate
+```
+
+If your SLO is 99.9% and 0.5% of requests are failing, the burn rate is 5: you are consuming the 30-day budget five times too fast. A burn rate of 1 exactly exhausts the budget over the window.
+
+Multi-window alerting reduces both false pages and missed incidents:
+
+- Fast burn: a high burn rate over a short window pages immediately.
+- Slow burn: a moderate burn rate over a longer window creates a ticket.
+- Require the condition to hold in both a short and a long window before paging.
+
+The exact thresholds are policy choices. The important part is that alerts are tied to user-visible objectives and have a runbook.
+
+Page versus ticket:
+
+- **Page:** the SLO is at risk now; a human must act.
+- **Ticket:** a trend will breach the SLO if ignored.
+- **Dashboard only:** useful context, no action required.
+
+Incident response:
+
+1. Detect and acknowledge.
+2. Assess customer impact and severity.
+3. Assign an incident commander and a communications owner.
+4. Mitigate first: roll back, disable a flag, shed load, fail over.
+5. Keep a timeline of decisions and timestamps.
+6. Resolve and verify with the SLI.
+7. Hold a blameless postmortem with action items, owners, and dates.
+
+Mitigation is not root-cause analysis. Restoring service comes first. A rollback is a valid fix even before you understand the bug.
+
+Runbooks should be short and executable:
+
+```text
+Symptom: /ask p99 latency above SLO for 10 minutes
+Check: dashboard link, recent deploys, provider status, database latency
+Mitigate: roll back previous image; disable reranking flag; increase timeout budget
+Verify: error rate and p99 return below threshold for 15 minutes
+Escalate: platform on-call if database saturation is the cause
+```
+
+A runbook that says “investigate” is not a runbook. Include commands, dashboards, expected outputs, and rollback steps.
+
+---
+
 ## Group H — SLOs, alerting, and incident response
 
 **H1.** Define an SLI for API availability. Answer:
@@ -2571,6 +2293,113 @@ Answer:
 
 ---
 
+## 12.10 Performance, load, and capacity
+
+Latency is a distribution. Report percentiles, not only the mean:
+
+```python
+from math import ceil
+
+
+def percentile(values: list[float], p: float) -> float:
+    if not values:
+        raise ValueError("empty sample")
+    if not 0 < p <= 1:
+        raise ValueError("p must be in (0, 1]")
+    ordered = sorted(values)
+    rank = ceil(p * len(ordered))
+    return ordered[rank - 1]
+```
+
+This is the nearest-rank definition. Different libraries use interpolation; state which one you use. A p95 of 200 ms means 95% of observed requests were at or below 200 ms, not that the average user sees 200 ms.
+
+Little's law relates concurrency, throughput, and latency:
+
+```text
+in-flight requests = throughput × latency
+```
+
+At 50 requests per second and 200 ms average latency, about 10 requests are in flight. If your connection pool has 5 connections, requests queue. This is a capacity bug, not a code-style issue.
+
+Queueing is nonlinear. At 50% utilization, queues are short; at 90%, latency rises sharply; at 100%, it grows without bound. Keep headroom for bursts and dependency slowdowns.
+
+A load test must define:
+
+- the target SLO and workload mix
+- request rate and concurrency model
+- realistic payload sizes, auth, and cache behavior
+- warmup and steady-state duration
+- stop conditions and safety limits
+- the environment and data isolation
+
+Test stages:
+
+1. Baseline at low rate.
+2. Ramp until the SLO breaks or saturation appears.
+3. Hold at expected peak.
+4. Spike briefly.
+5. Soak for hours to find leaks.
+
+Measure both client and server:
+
+- p50, p95, p99 latency
+- throughput and error rate
+- CPU, memory, file descriptors
+- connection pool usage and queue depth
+- dependency latency and error rate
+- garbage collection pauses if relevant
+
+Averages hide tail latency. A load test that only reports mean latency can pass while real users time out.
+
+Profiling:
+
+```python
+import cProfile
+import pstats
+
+
+def profile_me() -> None:
+    with cProfile.Profile() as profiler:
+        run_workload()
+    pstats.Stats(profiler).sort_stats("cumulative").print_stats(20)
+```
+
+Use `time.perf_counter()` for elapsed time; it is monotonic. `time.time()` can jump when the system clock changes.
+
+Memory:
+
+```python
+import tracemalloc
+
+tracemalloc.start()
+run_workload()
+snapshot = tracemalloc.take_snapshot()
+for stat in snapshot.statistics("lineno")[:10]:
+    print(stat)
+```
+
+Common production performance bugs:
+
+- a blocking call inside an async request handler
+- a synchronous database driver in an async service
+- unbounded `asyncio.create_task` calls
+- a connection pool smaller than the concurrency
+- retries without a budget or jitter
+- a timeout longer than the caller's timeout
+- CPU-bound work in the event loop
+- per-request client construction instead of reuse
+- logging large payloads on the hot path
+
+Capacity:
+
+- Measure memory per worker and per connection.
+- Autoscale on queue depth or concurrency, not only CPU.
+- Scale dependencies too; the database is often the bottleneck.
+- Keep headroom for one instance failure.
+- Test the failure of one replica, not only steady-state load.
+
+---
+
 ## Group I — Performance, load, and capacity
 
 **I1.** A sample has 100 latencies. Define p50, p95, and p99. Answer:
@@ -2725,6 +2554,177 @@ Answer:
 2. What metric should drive scaling?
 3. Why can scaling out increase database load?
 4. How do you prevent flapping?
+
+---
+
+## 12.11 CI/CD, migrations, and progressive delivery
+
+A release pipeline should be boring and repeatable:
+
+```text
+lint → typecheck → unit tests → integration tests
+     → build artifact once → scan → sign → SBOM
+     → deploy staging → smoke tests → canary
+     → promote or roll back
+```
+
+Use the same Python version and lock file in CI and production. A test that passes on 3.13 while production runs 3.12 is not evidence.
+
+A GitHub Actions sketch:
+
+```yaml
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install uv
+      - run: uv sync --frozen
+      - run: uv run pytest
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: docker build -t "$IMAGE:$GITHUB_SHA" .
+```
+
+Pin actions to a commit SHA in a high-security environment; tags can move. Use short-lived workload identity instead of long-lived cloud keys. Keep production credentials out of pull-request workflows.
+
+Artifact promotion:
+
+- Build once per commit.
+- Tag with the commit SHA and a semantic version.
+- Deploy the same digest to staging and production.
+- Record the digest, commit, migration version, and configuration hash in the release record.
+- Never deploy from a developer laptop as the normal path.
+
+Database migrations are the riskiest part of many deployments. Use expand/contract:
+
+1. **Expand:** add a nullable column, new table, or new index.
+2. **Deploy:** code writes both old and new forms and reads the old form.
+3. **Backfill:** populate the new form in batches.
+4. **Switch:** code reads the new form.
+5. **Contract:** remove the old column or table after no deployed code uses it.
+
+This allows old and new application versions to coexist during a rolling deploy. A destructive migration in the same release as a code change makes rollback unsafe.
+
+Migrations should:
+
+- run in a separate job, not in every web replica
+- take a lock so two jobs cannot race
+- be idempotent or tracked
+- be tested against production-sized data
+- have a backup or a forward-fix plan
+- have a timeout and a rollback/abort strategy
+
+Some migrations cannot be rolled back safely. Prefer additive changes and forward fixes.
+
+Progressive delivery:
+
+- **Canary:** send a small percentage of traffic to the new version; compare error rate, latency, and business metrics with the baseline; promote or roll back automatically.
+- **Blue-green:** run two environments, warm the new one, switch traffic, keep the old one for rollback.
+- **Feature flag:** deploy code dark and release behavior separately; provide a kill switch; assign an owner and an expiry date.
+
+A canary without a comparison is just a slow full deploy. Define the metrics and the rollback threshold before starting.
+
+Rollback checklist:
+
+- previous image digest is known
+- schema is backward compatible
+- feature flag can disable the new path
+- caches and queues can handle the old version
+- rollback is tested, not assumed
+- the on-call engineer knows how to verify recovery
+
+Smoke tests after deployment:
+
+- health and readiness return success
+- one authenticated request succeeds
+- one dependency call succeeds
+- one background job processes a test message
+- version and commit are the expected values
+
+---
+
+## 12.12 Security, cost, and common mistakes
+
+Deployment security is mostly about reducing blast radius:
+
+- run as non-root with a read-only filesystem
+- grant the workload only the permissions it needs
+- restrict network egress to known dependencies
+- terminate TLS at the edge and use secure headers
+- authenticate and authorize every business endpoint
+- rate-limit expensive endpoints
+- keep health and metrics endpoints internal
+- pin and scan dependencies and images
+- generate an SBOM and sign the image
+- rotate secrets and audit access
+
+Supply chain:
+
+- commit the lock file
+- verify hashes where the package manager supports it
+- review new dependencies and their licenses
+- scan images for known vulnerabilities
+- rebuild regularly to pick up base-image patches
+- do not run arbitrary install scripts from untrusted sources in production builds
+
+Observability data is production data. It can contain prompts, headers, user IDs, and database queries. Apply retention, access control, and redaction to logs, metrics, traces, and error reports. Do not assume a tracing backend is exempt because it is “only for debugging.”
+
+Cost drivers:
+
+- idle replicas and over-provisioned CPU or memory
+- high-cardinality metrics
+- verbose logs and long retention
+- unsampled traces
+- cross-region or egress traffic
+- external model calls and retries
+- storage of raw payloads that no one reads
+
+Track cost per request, per tenant, or per model call when the business depends on it. A cost dashboard without an owner becomes noise.
+
+Common deployment and observability mistakes:
+
+- liveness checks that depend on the database
+- readiness that stays true during shutdown
+- no drain window before the load balancer stops sending traffic
+- logs without request IDs
+- exceptions logged at every layer
+- metrics with user IDs or raw URLs as labels
+- alerting on CPU instead of user-visible symptoms
+- averaging latency percentiles
+- secrets in build arguments or image layers
+- mutable `latest` tags
+- migrations running from every replica
+- retries without jitter or a budget
+- deploying and releasing at the same time with no rollback
+- dashboards and alerts with no owner
+- observability data that ignores privacy requirements
+
+A final operational checklist:
+
+- Can you identify the deployed commit and artifact digest?
+- Can you tell whether the instance is ready without reading logs?
+- Does a slow request finish during shutdown?
+- Can you trace one request across the service boundary?
+- Do you know the SLO and the current error budget?
+- Does every page have a runbook?
+- Can you roll back without a database restore?
+- Are secrets absent from images, logs, and traces?
+- Does the load test reflect the real workload?
+- Is someone accountable for each dashboard and alert?
 
 ---
 
@@ -2938,3 +2938,5 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Explain a release, an incident, and a rollback to a TypeScript client.
 
 If any group felt slow, redo a subset of its exercises from scratch before treating this chapter as complete.
+
+[Back to the course index](../README.md)

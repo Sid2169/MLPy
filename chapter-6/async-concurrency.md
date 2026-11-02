@@ -106,531 +106,6 @@ Event-loop rules:
 
 ---
 
-## 6.3 Tasks, `gather`, and structured concurrency
-
-A task is a coroutine scheduled on the loop. Tasks start running when the loop gets control.
-
-```python
-async def fetch(name: str, delay: float) -> str:
-    await asyncio.sleep(delay)
-    return name
-
-async def main() -> None:
-    t1 = asyncio.create_task(fetch("a", 1.0))
-    t2 = asyncio.create_task(fetch("b", 1.0))
-    print(await t1, await t2)      # both run concurrently; about 1s total
-
-asyncio.run(main())
-```
-
-Keep a reference to every task you create. The loop keeps only weak references; a task with no strong reference can be garbage-collected mid-flight.
-
-Sequential awaits sum their latency. `asyncio.gather` runs awaitables concurrently and returns results in input order:
-
-```python
-results = await asyncio.gather(
-    fetch("a", 1.0),
-    fetch("b", 1.0),
-)
-print(results)                     # ['a', 'b']
-```
-
-Important `gather` semantics:
-
-- Results preserve the order of the input awaitables, not completion order.
-- With `return_exceptions=False` (default), the first exception propagates to the caller. The other awaitables are **not** cancelled automatically; they may still be running.
-- With `return_exceptions=True`, exceptions are returned in the results list instead of raised. You must inspect each element.
-- Cancelling the `gather` future cancels all child awaitables that have not completed.
-
-For structured concurrency, use `asyncio.TaskGroup` (3.11+):
-
-```python
-async def main() -> None:
-    async with asyncio.TaskGroup() as tg:
-        t1 = tg.create_task(fetch("a", 1.0))
-        t2 = tg.create_task(fetch("b", 1.0))
-    print(t1.result(), t2.result())
-```
-
-A task group waits for all tasks. If one fails, it cancels the remaining tasks, waits for them to finish, and raises an `ExceptionGroup` containing the failures. The context manager does not exit until every task is done.
-
-```python
-try:
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(may_fail())
-        tg.create_task(also_may_fail())
-except* ValueError as group:
-    for exc in group.exceptions:
-        print("value error:", exc)
-```
-
-`except*` is the 3.11 syntax for handling exception groups. On 3.10, use `gather(return_exceptions=True)` and inspect results, or a third-party structured-concurrency library.
-
-`asyncio.as_completed` yields results as they finish, which is useful for progress reporting or streaming:
-
-```python
-for coro in asyncio.as_completed([fetch("a", 1.0), fetch("b", 0.2)]):
-    print(await coro)
-```
-
-Guidelines:
-
-- Use `TaskGroup` when tasks form a unit: all must succeed, or the whole operation fails and cleans up.
-- Use `gather` when you need a fixed set of results and will handle partial failure explicitly.
-- Use `as_completed` when order does not matter and you want to process results as they arrive.
-- Never create background tasks you do not await, track, or cancel deliberately.
-
----
-
-## 6.4 Cancellation, timeouts, and cleanup
-
-Cancellation in asyncio is cooperative. `task.cancel()` requests cancellation; the task receives `asyncio.CancelledError` at its next `await` (or immediately if it has not started). The task can clean up in `finally`, but it should re-raise the cancellation unless it has a good reason not to.
-
-```python
-async def worker() -> None:
-    try:
-        while True:
-            await asyncio.sleep(0.1)
-    finally:
-        print("cleaning up")
-
-async def main() -> None:
-    task = asyncio.create_task(worker())
-    await asyncio.sleep(0.25)
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        print("worker cancelled")
-```
-
-Key facts:
-
-- `asyncio.CancelledError` inherits from `BaseException`, not `Exception` (since Python 3.8). A bare `except Exception` will not catch it.
-- If you catch `CancelledError`, re-raise it unless you are deliberately converting it into another outcome. Suppressing it makes the task look successful and breaks shutdown semantics.
-- Cleanup belongs in `finally` or an `async with` block. It runs on cancellation, on timeout, and on ordinary exceptions.
-- Cancellation only happens at await points. A tight CPU loop with no awaits cannot be cancelled promptly and blocks the loop.
-
-Timeouts:
-
-```python
-# Python 3.11+
-try:
-    async with asyncio.timeout(2.0):
-        await call_upstream()
-except TimeoutError:
-    handle_timeout()
-
-# Works on older versions
-try:
-    await asyncio.wait_for(call_upstream(), timeout=2.0)
-except asyncio.TimeoutError:
-    handle_timeout()
-```
-
-A timeout cancels the inner operation. If the operation ignores cancellation, the timeout cannot force it to stop. `asyncio.shield` protects an inner operation from outer cancellation:
-
-```python
-inner = asyncio.create_task(write_audit_log())
-try:
-    async with asyncio.timeout(1.0):
-        await asyncio.shield(inner)
-except TimeoutError:
-    print("audit log still running")
-```
-
-Shielding means the caller gets the timeout, but the inner task continues. You remain responsible for awaiting or cancelling it eventually. Shield is useful for critical writes that must finish; it is not a way to ignore cancellation.
-
-Cleanup patterns:
-
-```python
-async def fetch(client: httpx.AsyncClient, url: str) -> dict:
-    async with client.stream("GET", url) as response:
-        response.raise_for_status()
-        return await response.json()
-```
-
-The `async with` closes the stream even when the body raises or the enclosing task is cancelled. For long-lived resources, use lifespan or an async context manager at the appropriate scope. Do not rely on `__del__` for closing async clients.
-
-Common cancellation bugs:
-
-- Swallowing `CancelledError` inside a broad `try/finally` without re-raising.
-- Using `except Exception` around a cancellation point and then continuing.
-- Creating a task, cancelling it, and never awaiting it, so cleanup errors are lost.
-- Cleaning up only on success, so timeouts leak connections.
-- Treating timeout as a normal failure when it may have left an operation partially complete.
-
----
-
-## 6.5 Concurrency limits and backpressure
-
-Unbounded concurrency is a reliability bug. `gather(*[fetch(url) for url in urls])` launches everything at once. With 10,000 URLs, you get 10,000 open connections, memory pressure, upstream rate limits, and a hard-to-debug outage.
-
-Use a semaphore to bound in-flight work:
-
-```python
-async def fetch_all(urls: list[str], client: httpx.AsyncClient) -> list[dict]:
-    sem = asyncio.Semaphore(20)
-
-    async def bounded(url: str) -> dict:
-        async with sem:
-            response = await client.get(url)
-            response.raise_for_status()
-            return response.json()
-
-    return await asyncio.gather(*(bounded(url) for url in urls))
-```
-
-The semaphore is acquired inside each coroutine, so only 20 requests are in flight. The remaining coroutines wait; they do not consume network connections. `asyncio.BoundedSemaphore` additionally raises if released too many times, which catches bugs.
-
-This is concurrency limiting, not rate limiting. A semaphore of 20 still allows 20 requests in the same millisecond. Rate limiting needs timestamps or a token bucket:
-
-```python
-class RateLimiter:
-    def __init__(self, rate: float) -> None:
-        self._interval = 1.0 / rate
-        self._lock = asyncio.Lock()
-        self._next = 0.0
-
-    async def wait(self) -> None:
-        async with self._lock:
-            loop = asyncio.get_running_loop()
-            now = loop.time()
-            delay = max(0.0, self._next - now)
-            self._next = max(now, self._next) + self._interval
-        if delay:
-            await asyncio.sleep(delay)
-```
-
-For sustained workloads, a worker pool with `asyncio.Queue` gives backpressure. Producers block when the queue is full, so memory stays bounded:
-
-```python
-queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
-
-async def worker() -> None:
-    while True:
-        url = await queue.get()
-        try:
-            await process(url)
-        finally:
-            queue.task_done()
-
-async def main(urls: list[str]) -> None:
-    tasks = [asyncio.create_task(worker()) for _ in range(10)]
-    try:
-        for url in urls:
-            await queue.put(url)       # blocks when full
-        await queue.join()
-    finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-```
-
-`Queue(maxsize=...)` provides bounded buffering. Without `maxsize`, `put` never blocks and memory grows without limit.
-
-Fan-out guidelines:
-
-- Bound concurrency at every external boundary: HTTP, database, LLM provider.
-- Choose limits from the dependency's capacity and your timeout budget, not from a round number.
-- Prefer a worker pool for large or unbounded streams of work.
-- Handle per-item failures explicitly; one bad URL should not fail a 10,000-item export unless that is the contract.
-- Measure queue depth, in-flight requests, and latency; limits should be observable.
-
----
-
-## 6.6 Asynchronous HTTP clients
-
-`httpx.AsyncClient` is the async counterpart of `httpx.Client`. Reuse one client per process; it owns a connection pool, TLS sessions, and timeouts.
-
-```python
-import httpx
-
-async def get_book(client: httpx.AsyncClient, isbn: str) -> dict:
-    response = await client.get(f"/books/{isbn}")
-    response.raise_for_status()
-    return response.json()
-```
-
-A client is usually created in the application lifespan:
-
-```python
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with httpx.AsyncClient(
-        base_url="https://catalogue.internal",
-        timeout=httpx.Timeout(10.0, connect=2.0),
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-    ) as client:
-        app.state.client = client
-        yield
-
-app = FastAPI(lifespan=lifespan)
-```
-
-- `timeout` covers connect, read, write, and pool waits. Set granular values when operations differ: a health check and a bulk export should not share one generous timeout.
-- `limits` caps total and idle connections. Without a pool limit, a burst can open arbitrarily many sockets.
-- `AsyncClient` must be closed. `async with` or lifespan handles this. Do not create one per request.
-- Never call `requests` or `httpx.Client` (sync) from an `async def`; it blocks the loop.
-
-Streaming large responses:
-
-```python
-async with client.stream("GET", "/export") as response:
-    response.raise_for_status()
-    async for chunk in response.aiter_bytes():
-        process(chunk)
-```
-
-For retries, keep the policy in a service layer, use `asyncio.sleep` for delays, retry only transient failures, and bound attempts. Do not retry a non-idempotent `POST` unless the upstream supports an idempotency key.
-
-```python
-async def get_with_retry(client: httpx.AsyncClient, url: str) -> httpx.Response:
-    for attempt in range(3):
-        try:
-            response = await client.get(url)
-            if response.status_code in {429, 500, 502, 503, 504} and attempt < 2:
-                await asyncio.sleep(0.2 * (2 ** attempt))
-                continue
-            response.raise_for_status()
-            return response
-        except (httpx.TimeoutException, httpx.TransportError):
-            if attempt == 2:
-                raise
-            await asyncio.sleep(0.2 * (2 ** attempt))
-    raise AssertionError("unreachable")
-```
-
-Chapter 5's mapping rules still apply: timeout becomes `504`, upstream 5xx or invalid payload becomes `502`, and caller-caused upstream 4xx becomes `400` or `404`.
-
----
-
-## 6.7 Bridging sync and async code
-
-You will often have a blocking library inside an async service. Options, in order of preference:
-
-1. Replace it with an async-native client.
-2. Run the blocking call in a thread with `asyncio.to_thread`.
-3. Use a dedicated executor with `loop.run_in_executor`.
-4. Isolate it behind a synchronous FastAPI route (`def`), which FastAPI runs in its thread pool.
-
-```python
-import asyncio
-
-def read_config() -> str:
-    return open("config.toml").read()       # blocking
-
-async def load_config() -> str:
-    return await asyncio.to_thread(read_config)
-```
-
-`asyncio.to_thread` uses the loop's default thread pool. The GIL is released during blocking I/O, so other threads and the event loop can make progress. For CPU-bound work, threads do not help because they contend for the GIL:
-
-```python
-from concurrent.futures import ProcessPoolExecutor
-
-def resize(path: str) -> bytes:
-    ...
-
-async def resize_async(path: str, pool: ProcessPoolExecutor) -> bytes:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(pool, resize, path)
-```
-
-Processes have startup and pickling costs; use them for genuinely CPU-heavy work, not for many tiny tasks.
-
-Calling async from sync code:
-
-- At the top level, use `asyncio.run`.
-- Inside a running loop, do not call `asyncio.run`; use `await` or schedule a task.
-- If a sync library insists on calling an async function, run that library in a separate thread with its own loop, or restructure the boundary. Do not nest loops casually.
-
-Thread-safety notes:
-
-- Asyncio locks, semaphores, queues, tasks, and clients are not thread-safe. Do not use them from multiple threads.
-- If a coroutine must communicate with a thread, use `loop.call_soon_threadsafe` or `asyncio.run_coroutine_threadsafe`.
-- Sharing an `AsyncClient` across event loops breaks its connection pool.
-- `contextvars` propagate into `to_thread` calls in current Python versions, but do not assume they propagate into arbitrary executors.
-
-FastAPI's threadpool and the event loop are different worlds. A `def` route runs in a worker thread and may block; an `async def` route runs on the loop and must not block. Choose per route, not per application.
-
----
-
-## 6.8 Async FastAPI
-
-FastAPI supports both kinds of handlers:
-
-```python
-@app.get("/books")
-def list_books() -> list[Book]:       # runs in a thread pool
-    return repo.list_books()
-
-@app.get("/weather/{city}")
-async def weather(city: str, client: AsyncClientDep) -> dict:
-    response = await client.get(f"/weather/{city}")   # runs on the loop
-    response.raise_for_status()
-    return response.json()
-```
-
-Use `async def` only when the handler awaits async I/O all the way down. An `async def` handler that calls `requests.get` or `time.sleep` stalls every concurrent request on the process.
-
-Async dependencies use the same `Depends` mechanism:
-
-```python
-async def get_client(request: Request) -> httpx.AsyncClient:
-    return request.app.state.client
-
-ClientDep = Annotated[httpx.AsyncClient, Depends(get_client)]
-
-async def get_current_user(authorization: Annotated[str | None, Header()] = None) -> User:
-    if authorization is None:
-        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Bearer"})
-    return await verify_token(authorization)
-```
-
-An async `yield` dependency's cleanup runs after the response, and it runs on cancellation as well:
-
-```python
-async def get_session() -> AsyncIterator[Session]:
-    async with session_factory() as session:
-        yield session
-```
-
-Async lifespan replaces `startup`/`shutdown` handlers. Create shared clients, pools, and caches there; close them on exit.
-
-For bounded concurrency inside an app, inject a semaphore or a dedicated service:
-
-```python
-async def get_limiter(request: Request) -> asyncio.Semaphore:
-    return request.app.state.upstream_semaphore
-
-LimiterDep = Annotated[asyncio.Semaphore, Depends(get_limiter)]
-
-@app.get("/search")
-async def search(q: str, client: ClientDep, limiter: LimiterDep) -> dict:
-    async with limiter:
-        response = await client.get("/search", params={"q": q})
-    response.raise_for_status()
-    return response.json()
-```
-
-If you must call blocking code from an async handler, use `starlette.concurrency.run_in_threadpool` or `asyncio.to_thread`. Do not hide it behind a normal function call.
-
-Testing note: FastAPI's sync `TestClient` can call async routes, but it runs its own loop and does not run lifespan unless used as a context manager. For async tests, use `httpx.AsyncClient` with `ASGITransport` (Section 6.9). Domain exception handlers from Chapter 5 remain unchanged; an async handler raising `HTTPException` behaves the same as a sync one.
-
----
-
-## 6.9 Testing asynchronous code
-
-Use `pytest-asyncio` (or `anyio`) to run async tests. A minimal configuration:
-
-```toml
-# pyproject.toml
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-```
-
-Then async test functions and fixtures run without an explicit marker:
-
-```python
-import pytest
-from httpx import ASGITransport, AsyncClient
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-
-async def test_health(client: AsyncClient) -> None:
-    response = await client.get("/health")
-    assert response.status_code == 200
-```
-
-`ASGITransport` calls the ASGI app in-process. It does not start a server and does not run lifespan events by default. If a test needs lifespan-managed resources, use `asgi-lifespan`'s `LifespanManager`, or override the relevant dependencies with fakes.
-
-Testing cancellation and timeouts:
-
-```python
-async def test_timeout() -> None:
-    async def slow() -> None:
-        await asyncio.sleep(1)
-
-    with pytest.raises(TimeoutError):
-        async with asyncio.timeout(0.01):
-            await slow()
-```
-
-Avoid asserting exact elapsed times. A test that expects "about 100 ms" will be flaky on CI. Use events for synchronization:
-
-```python
-async def test_worker_waits_for_signal() -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    async def worker() -> None:
-        started.set()
-        await release.wait()
-
-    task = asyncio.create_task(worker())
-    await started.wait()
-    assert not task.done()
-    release.set()
-    await task
-```
-
-For upstream HTTP, use `httpx.MockTransport` with `AsyncClient`, exactly as in Chapter 5, and assert the request shape and the mapped domain exception or response. For service tests, call async methods directly; do not start FastAPI.
-
-Test these async-specific behaviors:
-
-- The operation completes within a timeout and the timeout is enforced.
-- Cancellation triggers cleanup and re-raises.
-- A failing task in a `TaskGroup` cancels its siblings.
-- Concurrency limits are respected.
-- Partial failures are reported per item.
-- No task is left pending at the end of the test.
-
-If using pytest-asyncio in strict mode, mark tests with `@pytest.mark.asyncio` and async fixtures with `@pytest_asyncio.fixture`. In `auto` mode, plain `@pytest.fixture` works. Whichever you choose, keep the configuration in the project, not in individual tests.
-
----
-
-## 6.10 Common mistakes and conventions
-
-Mistakes to avoid:
-
-1. Calling an `async def` function without `await` or scheduling it; the coroutine never runs.
-2. Calling `asyncio.run` inside a running event loop.
-3. Using `time.sleep`, `requests`, or blocking database drivers inside `async def`.
-4. Creating tasks and dropping the reference, or never awaiting them.
-5. Using `gather` for unbounded fan-out.
-6. Assuming `gather` cancels siblings when one fails; it does not by default.
-7. Catching `CancelledError` with `except Exception` and being surprised it is not caught.
-8. Swallowing cancellation instead of re-raising it.
-9. Omitting timeouts on external calls.
-10. Creating an `AsyncClient` (or DB session) per request instead of reusing one.
-11. Sharing asyncio primitives or clients across event loops or threads.
-12. Using threads for CPU-bound work and expecting parallelism.
-13. Treating a semaphore as a rate limiter.
-14. Using unbounded `asyncio.Queue()` and losing backpressure.
-15. Writing timing-sensitive tests with real sleeps.
-
-Conventions to adopt:
-
-- `async def` only for awaitable I/O; `def` for blocking code unless you deliberately offload.
-- Every external call has a timeout; every batch has a concurrency bound.
-- One long-lived `AsyncClient` per process, created in lifespan and closed on shutdown.
-- `TaskGroup` for structured fan-out; `gather` only when partial failure is handled explicitly.
-- Cleanup in `finally` or `async with`; never suppress `CancelledError`.
-- `asyncio.to_thread` for blocking I/O in async code; process pools for CPU-bound work.
-- Bounded queues and worker pools for large workloads.
-- Tests use `ASGITransport`, `MockTransport`, and events rather than real network calls or sleeps.
-- Log task failures and cancellation at the right level; cancellation is not an error in normal shutdown.
-
----
-
 # Exercises
 
 Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory. Most exercises can be run with a plain Python 3.11+ interpreter; HTTP exercises need `httpx`, and FastAPI exercises need the Chapter 5 project.
@@ -886,6 +361,82 @@ Explain why, then propose two fixes: one that keeps the CPU work and one that re
 
 ---
 
+## 6.3 Tasks, `gather`, and structured concurrency
+
+A task is a coroutine scheduled on the loop. Tasks start running when the loop gets control.
+
+```python
+async def fetch(name: str, delay: float) -> str:
+    await asyncio.sleep(delay)
+    return name
+
+async def main() -> None:
+    t1 = asyncio.create_task(fetch("a", 1.0))
+    t2 = asyncio.create_task(fetch("b", 1.0))
+    print(await t1, await t2)      # both run concurrently; about 1s total
+
+asyncio.run(main())
+```
+
+Keep a reference to every task you create. The loop keeps only weak references; a task with no strong reference can be garbage-collected mid-flight.
+
+Sequential awaits sum their latency. `asyncio.gather` runs awaitables concurrently and returns results in input order:
+
+```python
+results = await asyncio.gather(
+    fetch("a", 1.0),
+    fetch("b", 1.0),
+)
+print(results)                     # ['a', 'b']
+```
+
+Important `gather` semantics:
+
+- Results preserve the order of the input awaitables, not completion order.
+- With `return_exceptions=False` (default), the first exception propagates to the caller. The other awaitables are **not** cancelled automatically; they may still be running.
+- With `return_exceptions=True`, exceptions are returned in the results list instead of raised. You must inspect each element.
+- Cancelling the `gather` future cancels all child awaitables that have not completed.
+
+For structured concurrency, use `asyncio.TaskGroup` (3.11+):
+
+```python
+async def main() -> None:
+    async with asyncio.TaskGroup() as tg:
+        t1 = tg.create_task(fetch("a", 1.0))
+        t2 = tg.create_task(fetch("b", 1.0))
+    print(t1.result(), t2.result())
+```
+
+A task group waits for all tasks. If one fails, it cancels the remaining tasks, waits for them to finish, and raises an `ExceptionGroup` containing the failures. The context manager does not exit until every task is done.
+
+```python
+try:
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(may_fail())
+        tg.create_task(also_may_fail())
+except* ValueError as group:
+    for exc in group.exceptions:
+        print("value error:", exc)
+```
+
+`except*` is the 3.11 syntax for handling exception groups. On 3.10, use `gather(return_exceptions=True)` and inspect results, or a third-party structured-concurrency library.
+
+`asyncio.as_completed` yields results as they finish, which is useful for progress reporting or streaming:
+
+```python
+for coro in asyncio.as_completed([fetch("a", 1.0), fetch("b", 0.2)]):
+    print(await coro)
+```
+
+Guidelines:
+
+- Use `TaskGroup` when tasks form a unit: all must succeed, or the whole operation fails and cleans up.
+- Use `gather` when you need a fixed set of results and will handle partial failure explicitly.
+- Use `as_completed` when order does not matter and you want to process results as they arrive.
+- Never create background tasks you do not await, track, or cancel deliberately.
+
+---
+
 ## Group B — Tasks, `gather`, and structured concurrency
 
 **B1.** Predict the print order:
@@ -1100,6 +651,86 @@ State the approximate elapsed time for each and why.
 
 ---
 
+## 6.4 Cancellation, timeouts, and cleanup
+
+Cancellation in asyncio is cooperative. `task.cancel()` requests cancellation; the task receives `asyncio.CancelledError` at its next `await` (or immediately if it has not started). The task can clean up in `finally`, but it should re-raise the cancellation unless it has a good reason not to.
+
+```python
+async def worker() -> None:
+    try:
+        while True:
+            await asyncio.sleep(0.1)
+    finally:
+        print("cleaning up")
+
+async def main() -> None:
+    task = asyncio.create_task(worker())
+    await asyncio.sleep(0.25)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        print("worker cancelled")
+```
+
+Key facts:
+
+- `asyncio.CancelledError` inherits from `BaseException`, not `Exception` (since Python 3.8). A bare `except Exception` will not catch it.
+- If you catch `CancelledError`, re-raise it unless you are deliberately converting it into another outcome. Suppressing it makes the task look successful and breaks shutdown semantics.
+- Cleanup belongs in `finally` or an `async with` block. It runs on cancellation, on timeout, and on ordinary exceptions.
+- Cancellation only happens at await points. A tight CPU loop with no awaits cannot be cancelled promptly and blocks the loop.
+
+Timeouts:
+
+```python
+# Python 3.11+
+try:
+    async with asyncio.timeout(2.0):
+        await call_upstream()
+except TimeoutError:
+    handle_timeout()
+
+# Works on older versions
+try:
+    await asyncio.wait_for(call_upstream(), timeout=2.0)
+except asyncio.TimeoutError:
+    handle_timeout()
+```
+
+A timeout cancels the inner operation. If the operation ignores cancellation, the timeout cannot force it to stop. `asyncio.shield` protects an inner operation from outer cancellation:
+
+```python
+inner = asyncio.create_task(write_audit_log())
+try:
+    async with asyncio.timeout(1.0):
+        await asyncio.shield(inner)
+except TimeoutError:
+    print("audit log still running")
+```
+
+Shielding means the caller gets the timeout, but the inner task continues. You remain responsible for awaiting or cancelling it eventually. Shield is useful for critical writes that must finish; it is not a way to ignore cancellation.
+
+Cleanup patterns:
+
+```python
+async def fetch(client: httpx.AsyncClient, url: str) -> dict:
+    async with client.stream("GET", url) as response:
+        response.raise_for_status()
+        return await response.json()
+```
+
+The `async with` closes the stream even when the body raises or the enclosing task is cancelled. For long-lived resources, use lifespan or an async context manager at the appropriate scope. Do not rely on `__del__` for closing async clients.
+
+Common cancellation bugs:
+
+- Swallowing `CancelledError` inside a broad `try/finally` without re-raising.
+- Using `except Exception` around a cancellation point and then continuing.
+- Creating a task, cancelling it, and never awaiting it, so cleanup errors are lost.
+- Cleaning up only on success, so timeouts leak connections.
+- Treating timeout as a normal failure when it may have left an operation partially complete.
+
+---
+
 ## Group C — Cancellation, timeouts, and cleanup
 
 **C1.** Predict the output and the exception seen by the caller:
@@ -1286,6 +917,83 @@ asyncio.run(main())
 
 ---
 
+## 6.5 Concurrency limits and backpressure
+
+Unbounded concurrency is a reliability bug. `gather(*[fetch(url) for url in urls])` launches everything at once. With 10,000 URLs, you get 10,000 open connections, memory pressure, upstream rate limits, and a hard-to-debug outage.
+
+Use a semaphore to bound in-flight work:
+
+```python
+async def fetch_all(urls: list[str], client: httpx.AsyncClient) -> list[dict]:
+    sem = asyncio.Semaphore(20)
+
+    async def bounded(url: str) -> dict:
+        async with sem:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+
+    return await asyncio.gather(*(bounded(url) for url in urls))
+```
+
+The semaphore is acquired inside each coroutine, so only 20 requests are in flight. The remaining coroutines wait; they do not consume network connections. `asyncio.BoundedSemaphore` additionally raises if released too many times, which catches bugs.
+
+This is concurrency limiting, not rate limiting. A semaphore of 20 still allows 20 requests in the same millisecond. Rate limiting needs timestamps or a token bucket:
+
+```python
+class RateLimiter:
+    def __init__(self, rate: float) -> None:
+        self._interval = 1.0 / rate
+        self._lock = asyncio.Lock()
+        self._next = 0.0
+
+    async def wait(self) -> None:
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            delay = max(0.0, self._next - now)
+            self._next = max(now, self._next) + self._interval
+        if delay:
+            await asyncio.sleep(delay)
+```
+
+For sustained workloads, a worker pool with `asyncio.Queue` gives backpressure. Producers block when the queue is full, so memory stays bounded:
+
+```python
+queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
+
+async def worker() -> None:
+    while True:
+        url = await queue.get()
+        try:
+            await process(url)
+        finally:
+            queue.task_done()
+
+async def main(urls: list[str]) -> None:
+    tasks = [asyncio.create_task(worker()) for _ in range(10)]
+    try:
+        for url in urls:
+            await queue.put(url)       # blocks when full
+        await queue.join()
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+```
+
+`Queue(maxsize=...)` provides bounded buffering. Without `maxsize`, `put` never blocks and memory grows without limit.
+
+Fan-out guidelines:
+
+- Bound concurrency at every external boundary: HTTP, database, LLM provider.
+- Choose limits from the dependency's capacity and your timeout budget, not from a round number.
+- Prefer a worker pool for large or unbounded streams of work.
+- Handle per-item failures explicitly; one bad URL should not fail a 10,000-item export unless that is the contract.
+- Measure queue depth, in-flight requests, and latency; limits should be observable.
+
+---
+
 ## Group D — Concurrency limits and backpressure
 
 **D1.** This code starts 100 tasks with a semaphore of 5. Predict the maximum number of tasks inside the critical section, and explain how you would measure it with a counter:
@@ -1408,6 +1116,75 @@ Predict `count` roughly, explain the interleaving that causes it, and fix it wit
 2. What does `async with sem` guarantee on cancellation?
 3. How can a manual `acquire()`/`release()` pair leak a permit?
 4. Why is `async with` safer?
+
+---
+
+## 6.6 Asynchronous HTTP clients
+
+`httpx.AsyncClient` is the async counterpart of `httpx.Client`. Reuse one client per process; it owns a connection pool, TLS sessions, and timeouts.
+
+```python
+import httpx
+
+async def get_book(client: httpx.AsyncClient, isbn: str) -> dict:
+    response = await client.get(f"/books/{isbn}")
+    response.raise_for_status()
+    return response.json()
+```
+
+A client is usually created in the application lifespan:
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with httpx.AsyncClient(
+        base_url="https://catalogue.internal",
+        timeout=httpx.Timeout(10.0, connect=2.0),
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+    ) as client:
+        app.state.client = client
+        yield
+
+app = FastAPI(lifespan=lifespan)
+```
+
+- `timeout` covers connect, read, write, and pool waits. Set granular values when operations differ: a health check and a bulk export should not share one generous timeout.
+- `limits` caps total and idle connections. Without a pool limit, a burst can open arbitrarily many sockets.
+- `AsyncClient` must be closed. `async with` or lifespan handles this. Do not create one per request.
+- Never call `requests` or `httpx.Client` (sync) from an `async def`; it blocks the loop.
+
+Streaming large responses:
+
+```python
+async with client.stream("GET", "/export") as response:
+    response.raise_for_status()
+    async for chunk in response.aiter_bytes():
+        process(chunk)
+```
+
+For retries, keep the policy in a service layer, use `asyncio.sleep` for delays, retry only transient failures, and bound attempts. Do not retry a non-idempotent `POST` unless the upstream supports an idempotency key.
+
+```python
+async def get_with_retry(client: httpx.AsyncClient, url: str) -> httpx.Response:
+    for attempt in range(3):
+        try:
+            response = await client.get(url)
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < 2:
+                await asyncio.sleep(0.2 * (2 ** attempt))
+                continue
+            response.raise_for_status()
+            return response
+        except (httpx.TimeoutException, httpx.TransportError):
+            if attempt == 2:
+                raise
+            await asyncio.sleep(0.2 * (2 ** attempt))
+    raise AssertionError("unreachable")
+```
+
+Chapter 5's mapping rules still apply: timeout becomes `504`, upstream 5xx or invalid payload becomes `502`, and caller-caused upstream 4xx becomes `400` or `404`.
 
 ---
 
@@ -1549,6 +1326,57 @@ State the error, why it occurs, and what warning may appear if the coroutine is 
 4. How do you ensure retries do not exceed the budget?
 
 **E22.** For each situation, choose `httpx.Client` or `httpx.AsyncClient`: a sync FastAPI `def` handler, an `async def` handler, a CLI script that just makes one call, a background thread, and an async service with 1,000 concurrent requests. Explain the choice in each case.
+
+## 6.7 Bridging sync and async code
+
+You will often have a blocking library inside an async service. Options, in order of preference:
+
+1. Replace it with an async-native client.
+2. Run the blocking call in a thread with `asyncio.to_thread`.
+3. Use a dedicated executor with `loop.run_in_executor`.
+4. Isolate it behind a synchronous FastAPI route (`def`), which FastAPI runs in its thread pool.
+
+```python
+import asyncio
+
+def read_config() -> str:
+    return open("config.toml").read()       # blocking
+
+async def load_config() -> str:
+    return await asyncio.to_thread(read_config)
+```
+
+`asyncio.to_thread` uses the loop's default thread pool. The GIL is released during blocking I/O, so other threads and the event loop can make progress. For CPU-bound work, threads do not help because they contend for the GIL:
+
+```python
+from concurrent.futures import ProcessPoolExecutor
+
+def resize(path: str) -> bytes:
+    ...
+
+async def resize_async(path: str, pool: ProcessPoolExecutor) -> bytes:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(pool, resize, path)
+```
+
+Processes have startup and pickling costs; use them for genuinely CPU-heavy work, not for many tiny tasks.
+
+Calling async from sync code:
+
+- At the top level, use `asyncio.run`.
+- Inside a running loop, do not call `asyncio.run`; use `await` or schedule a task.
+- If a sync library insists on calling an async function, run that library in a separate thread with its own loop, or restructure the boundary. Do not nest loops casually.
+
+Thread-safety notes:
+
+- Asyncio locks, semaphores, queues, tasks, and clients are not thread-safe. Do not use them from multiple threads.
+- If a coroutine must communicate with a thread, use `loop.call_soon_threadsafe` or `asyncio.run_coroutine_threadsafe`.
+- Sharing an `AsyncClient` across event loops breaks its connection pool.
+- `contextvars` propagate into `to_thread` calls in current Python versions, but do not assume they propagate into arbitrary executors.
+
+FastAPI's threadpool and the event loop are different worlds. A `def` route runs in a worker thread and may block; an `async def` route runs on the loop and must not block. Choose per route, not per application.
+
+---
 
 ## Group F — Bridging sync and async, threads, processes, and the GIL
 
@@ -1737,6 +1565,70 @@ Explain why each is wrong inside async code and rewrite the handler.
 
 ---
 
+## 6.8 Async FastAPI
+
+FastAPI supports both kinds of handlers:
+
+```python
+@app.get("/books")
+def list_books() -> list[Book]:       # runs in a thread pool
+    return repo.list_books()
+
+@app.get("/weather/{city}")
+async def weather(city: str, client: AsyncClientDep) -> dict:
+    response = await client.get(f"/weather/{city}")   # runs on the loop
+    response.raise_for_status()
+    return response.json()
+```
+
+Use `async def` only when the handler awaits async I/O all the way down. An `async def` handler that calls `requests.get` or `time.sleep` stalls every concurrent request on the process.
+
+Async dependencies use the same `Depends` mechanism:
+
+```python
+async def get_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.client
+
+ClientDep = Annotated[httpx.AsyncClient, Depends(get_client)]
+
+async def get_current_user(authorization: Annotated[str | None, Header()] = None) -> User:
+    if authorization is None:
+        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Bearer"})
+    return await verify_token(authorization)
+```
+
+An async `yield` dependency's cleanup runs after the response, and it runs on cancellation as well:
+
+```python
+async def get_session() -> AsyncIterator[Session]:
+    async with session_factory() as session:
+        yield session
+```
+
+Async lifespan replaces `startup`/`shutdown` handlers. Create shared clients, pools, and caches there; close them on exit.
+
+For bounded concurrency inside an app, inject a semaphore or a dedicated service:
+
+```python
+async def get_limiter(request: Request) -> asyncio.Semaphore:
+    return request.app.state.upstream_semaphore
+
+LimiterDep = Annotated[asyncio.Semaphore, Depends(get_limiter)]
+
+@app.get("/search")
+async def search(q: str, client: ClientDep, limiter: LimiterDep) -> dict:
+    async with limiter:
+        response = await client.get("/search", params={"q": q})
+    response.raise_for_status()
+    return response.json()
+```
+
+If you must call blocking code from an async handler, use `starlette.concurrency.run_in_threadpool` or `asyncio.to_thread`. Do not hide it behind a normal function call.
+
+Testing note: FastAPI's sync `TestClient` can call async routes, but it runs its own loop and does not run lifespan unless used as a context manager. For async tests, use `httpx.AsyncClient` with `ASGITransport` (Section 6.9). Domain exception handlers from Chapter 5 remain unchanged; an async handler raising `HTTPException` behaves the same as a sync one.
+
+---
+
 ## Group G — Async FastAPI
 
 **G1.** Convert this synchronous route to async, using a shared `AsyncClient` dependency:
@@ -1905,6 +1797,80 @@ async def report() -> dict:
 
 ---
 
+## 6.9 Testing asynchronous code
+
+Use `pytest-asyncio` (or `anyio`) to run async tests. A minimal configuration:
+
+```toml
+# pyproject.toml
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+```
+
+Then async test functions and fixtures run without an explicit marker:
+
+```python
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+async def test_health(client: AsyncClient) -> None:
+    response = await client.get("/health")
+    assert response.status_code == 200
+```
+
+`ASGITransport` calls the ASGI app in-process. It does not start a server and does not run lifespan events by default. If a test needs lifespan-managed resources, use `asgi-lifespan`'s `LifespanManager`, or override the relevant dependencies with fakes.
+
+Testing cancellation and timeouts:
+
+```python
+async def test_timeout() -> None:
+    async def slow() -> None:
+        await asyncio.sleep(1)
+
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.01):
+            await slow()
+```
+
+Avoid asserting exact elapsed times. A test that expects "about 100 ms" will be flaky on CI. Use events for synchronization:
+
+```python
+async def test_worker_waits_for_signal() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def worker() -> None:
+        started.set()
+        await release.wait()
+
+    task = asyncio.create_task(worker())
+    await started.wait()
+    assert not task.done()
+    release.set()
+    await task
+```
+
+For upstream HTTP, use `httpx.MockTransport` with `AsyncClient`, exactly as in Chapter 5, and assert the request shape and the mapped domain exception or response. For service tests, call async methods directly; do not start FastAPI.
+
+Test these async-specific behaviors:
+
+- The operation completes within a timeout and the timeout is enforced.
+- Cancellation triggers cleanup and re-raises.
+- A failing task in a `TaskGroup` cancels its siblings.
+- Concurrency limits are respected.
+- Partial failures are reported per item.
+- No task is left pending at the end of the test.
+
+If using pytest-asyncio in strict mode, mark tests with `@pytest.mark.asyncio` and async fixtures with `@pytest_asyncio.fixture`. In `auto` mode, plain `@pytest.fixture` works. Whichever you choose, keep the configuration in the project, not in individual tests.
+
+---
+
 ## Group H — Testing asynchronous code
 
 **H1.** Configure pytest for async tests. Answer:
@@ -2052,6 +2018,40 @@ async def test_concurrent() -> None:
 3. What exception does the caller see?
 4. How do you avoid a deadlock while waiting for the fake?
 5. Why is this test more valuable than a timeout test alone?
+
+---
+
+## 6.10 Common mistakes and conventions
+
+Mistakes to avoid:
+
+1. Calling an `async def` function without `await` or scheduling it; the coroutine never runs.
+2. Calling `asyncio.run` inside a running event loop.
+3. Using `time.sleep`, `requests`, or blocking database drivers inside `async def`.
+4. Creating tasks and dropping the reference, or never awaiting them.
+5. Using `gather` for unbounded fan-out.
+6. Assuming `gather` cancels siblings when one fails; it does not by default.
+7. Catching `CancelledError` with `except Exception` and being surprised it is not caught.
+8. Swallowing cancellation instead of re-raising it.
+9. Omitting timeouts on external calls.
+10. Creating an `AsyncClient` (or DB session) per request instead of reusing one.
+11. Sharing asyncio primitives or clients across event loops or threads.
+12. Using threads for CPU-bound work and expecting parallelism.
+13. Treating a semaphore as a rate limiter.
+14. Using unbounded `asyncio.Queue()` and losing backpressure.
+15. Writing timing-sensitive tests with real sleeps.
+
+Conventions to adopt:
+
+- `async def` only for awaitable I/O; `def` for blocking code unless you deliberately offload.
+- Every external call has a timeout; every batch has a concurrency bound.
+- One long-lived `AsyncClient` per process, created in lifespan and closed on shutdown.
+- `TaskGroup` for structured fan-out; `gather` only when partial failure is handled explicitly.
+- Cleanup in `finally` or `async with`; never suppress `CancelledError`.
+- `asyncio.to_thread` for blocking I/O in async code; process pools for CPU-bound work.
+- Bounded queues and worker pools for large workloads.
+- Tests use `ASGITransport`, `MockTransport`, and events rather than real network calls or sleeps.
+- Log task failures and cancellation at the right level; cancellation is not an error in normal shutdown.
 
 ---
 
@@ -2339,4 +2339,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Test async code deterministically with `pytest-asyncio`, `ASGITransport`, `MockTransport`, and events rather than sleeps.
 - Translate Promise-based patterns and concurrency limits from TypeScript into their asyncio equivalents.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 7.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 7](../chapter-7/data-processing.md).

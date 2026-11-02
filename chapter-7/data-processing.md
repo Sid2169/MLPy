@@ -108,655 +108,6 @@ arr.itemsize        # 8 bytes per element
 
 ---
 
-## 7.3 Indexing, slicing, views, and copies
-
-1D indexing and slicing:
-
-```python
-a = np.array([10, 20, 30, 40, 50])
-
-a[0]          # 10
-a[-1]         # 50
-a[1:4]        # [20 30 40]
-a[::2]        # [10 30 50]
-a[::-1]       # reversed
-```
-
-2D indexing:
-
-```python
-m = np.array([[1, 2, 3],
-              [4, 5, 6]])
-
-m[0, 1]       # 2 (row 0, column 1)
-m[1]          # row 1: [4 5 6]
-m[:, 1]       # column 1: [2 5]
-m[0:2, 1:]    # submatrix [[2, 3], [5, 6]]
-m[..., 0]     # all preceding axes, index 0 on the last axis
-```
-
-Boolean masks:
-
-```python
-a = np.array([1, 2, 3, 4])
-mask = a > 2
-a[mask]                  # [3 4]
-a[a % 2 == 0]            # [2 4]
-a[(a > 1) & (a < 4)]     # parentheses are required with & and |
-```
-
-Use `&`, `|`, and `~` for elementwise boolean logic. Python's `and`, `or`, and `not` do not work on arrays.
-
-Fancy indexing:
-
-```python
-a[[0, 2, 3]]             # [1 3 4]
-a[[-1, 0]]               # [4 1]
-m[[0, 1], [2, 0]]        # [3, 4]: pairs (0,2) and (1,0)
-```
-
-Views versus copies:
-
-- Basic slicing (`a[1:4]`, `m[:, 0]`) returns a view: changing it changes the original.
-- Boolean masks and fancy indexing return copies: changing the result does not change the original.
-- `reshape` and `ravel` return a view when possible; `flatten` and `.copy()` always copy.
-
-```python
-a = np.arange(6)
-view = a[::2]
-view[0] = 99
-print(a)                 # [99 1 2 3 4 5]
-
-copy = a[[0, 2]]
-copy[0] = -1
-print(a)                 # unchanged at that position
-```
-
-Assignment with masks:
-
-```python
-a = np.array([1, -2, 3, -4])
-a[a < 0] = 0             # [1 0 3 0]
-```
-
-`np.where` selects elementwise:
-
-```python
-np.where(a > 0, a, 0)
-```
-
-Sorting and searching:
-
-```python
-a = np.array([3, 1, 2])
-np.sort(a)               # returns a sorted copy
-a.sort()                 # sorts in place
-np.argsort(a)            # indices that would sort
-a.argmax(), a.argmin()
-np.unique(a, return_counts=True)
-```
-
-`np.isnan(a)` builds a mask; `a == np.nan` is always false.
-
----
-
-## 7.4 Broadcasting, vectorization, and reductions
-
-Broadcasting aligns shapes from the right. Two dimensions are compatible if they are equal or one of them is `1`.
-
-```python
-m = np.array([[1, 2, 3],
-              [4, 5, 6]])        # shape (2, 3)
-
-m + 10                          # scalar broadcast
-m + np.array([10, 20, 30])      # (3,) broadcasts across rows
-m + np.array([[10], [20]])      # (2, 1) broadcasts across columns
-m * 2
-m / 2
-```
-
-Incompatible shapes raise `ValueError`:
-
-```python
-np.ones((2, 3)) + np.ones((2, 2))   # ValueError
-```
-
-Reductions and `axis`:
-
-```python
-m.sum()             # all elements
-m.sum(axis=0)       # per column, result shape (3,)
-m.sum(axis=1)       # per row, result shape (2,)
-m.mean(axis=0, keepdims=True)   # shape (1, 3)
-```
-
-- `axis=0` reduces rows, producing one value per column.
-- `axis=1` reduces columns, producing one value per row.
-- `keepdims=True` preserves the reduced dimension as length 1, which helps with broadcasting.
-
-NumPy reductions use `ddof=0` by default for standard deviation (population). pandas uses `ddof=1` (sample). Do not compare them casually.
-
-```python
-a = np.array([1.0, 2.0, np.nan])
-a.mean()          # nan
-np.nanmean(a)     # 1.5
-np.nansum(a)      # 3.0
-```
-
-Vectorization:
-
-```python
-a = np.arange(1_000_000)
-
-total = 0
-for x in a:              # slow Python loop
-    total += x
-
-total = a.sum()          # fast C loop
-```
-
-Use ufuncs and array expressions (`a * 2 + 1`, `np.sqrt(a)`, `np.clip(a, 0, 1)`) instead of Python loops. Vectorized code is shorter, faster, and less error-prone, but it materializes intermediate arrays; for very large data, process in batches.
-
-Matrix operations:
-
-```python
-A = np.array([[1, 2], [3, 4]])
-B = np.array([[5, 6], [7, 8]])
-
-A * B            # elementwise
-A @ B            # matrix product
-np.dot(A, B)     # matrix product for 2D
-```
-
-Use `@` for matrix multiplication. `*` is always elementwise.
-
-A useful broadcasting example, row normalization:
-
-```python
-rows = np.array([[1.0, 2.0], [3.0, 4.0]])
-totals = rows.sum(axis=1, keepdims=True)   # shape (2, 1)
-normalized = rows / totals                 # (2, 2) / (2, 1)
-```
-
-Numerically stable softmax:
-
-```python
-def softmax(logits: np.ndarray) -> np.ndarray:
-    shifted = logits - logits.max(axis=-1, keepdims=True)
-    exp = np.exp(shifted)
-    return exp / exp.sum(axis=-1, keepdims=True)
-```
-
-Subtracting the maximum prevents overflow. Broadcast along the last axis with `keepdims=True`.
-
----
-
-## 7.5 pandas Series, DataFrames, and alignment
-
-```python
-import pandas as pd
-
-s = pd.Series([10, 20, 30], index=["a", "b", "c"], name="score")
-df = pd.DataFrame({
-    "title": ["Dune", "Emma", "Dracula"],
-    "price_cents": [1999, 899, 1299],
-    "in_stock": [True, True, False],
-})
-```
-
-Key attributes:
-
-```python
-s.values        # NumPy array (use s.to_numpy() for clarity)
-s.index         # Index(['a', 'b', 'c'])
-s.name          # 'score'
-df.columns      # Index([...])
-df.index        # RangeIndex(start=0, stop=3, step=1)
-df.shape        # (3, 3)
-df.dtypes       # dtype per column
-```
-
-Selection:
-
-```python
-df["title"]              # Series
-df[["title", "price_cents"]]   # DataFrame
-df.loc[0, "title"]       # label-based; row label 0, column label "title"
-df.iloc[0, 1]            # position-based; row 0, column 1
-df.loc[df["in_stock"], ["title"]]
-df.iloc[0:2, 0:2]
-```
-
-- `.loc` uses labels. Slices include both endpoints.
-- `.iloc` uses integer positions. Slices follow Python's exclusive-end rule.
-- `df[boolean_series]` filters rows.
-- `df["col"] = value` assigns a column.
-- `df.loc[mask, "col"] = value` assigns conditionally.
-
-Multiple conditions require parentheses:
-
-```python
-df[(df["price_cents"] > 1000) & df["in_stock"]]
-df[df["title"].isin(["Dune", "Emma"])]
-df.query("price_cents > 1000 and in_stock")
-```
-
-Index alignment is a core pandas semantic. Operations combine rows by index label, not by position:
-
-```python
-a = pd.Series([1, 2], index=["x", "y"])
-b = pd.Series([10, 20], index=["y", "x"])
-a + b
-# x    21
-# y    22
-```
-
-If labels do not match, the result includes the union of labels with missing values:
-
-```python
-c = pd.Series([1, 2], index=["x", "y"])
-d = pd.Series([10], index=["y"])
-c + d
-# x    NaN
-# y     12
-```
-
-Use `.reindex()`, `.reset_index(drop=True)`, or `.align()` when you need explicit control.
-
-Copy-on-write and chained assignment:
-
-```python
-df["price_cents"][0] = 1          # does not update df; raises ChainedAssignmentError warning
-df.loc[0, "price_cents"] = 1      # correct
-df.loc[df["in_stock"], "price_cents"] = 999
-```
-
-Pandas 3 enables copy-on-write by default, and pandas 2.x can enable it. Under copy-on-write, a chained assignment such as `df["col"][mask] = value` modifies a temporary object and never updates the original DataFrame. Always assign through `.loc` in one step. Methods such as `drop`, `rename`, and `assign` return new objects; `inplace=True` is discouraged.
-
----
-
-## 7.6 Loading, inspecting, and cleaning data
-
-CSV loading:
-
-```python
-df = pd.read_csv(
-    "books.csv",
-    usecols=["isbn", "title", "price_cents", "published_at"],
-    dtype={"isbn": "string", "price_cents": "Int64"},
-    parse_dates=["published_at"],
-    na_values=["", "NA", "N/A", "null"],
-)
-```
-
-Useful options:
-
-- `dtype` prevents unwanted inference. IDs with leading zeros must be strings: otherwise `"00123"` becomes `123`.
-- `parse_dates` converts date columns. Without it, dates remain strings.
-- `na_values` declares which tokens mean missing.
-- `usecols` reduces memory and catches schema drift early.
-- `nrows` is useful for inspection; `chunksize` streams large files.
-- `sep`, `decimal`, `encoding`, and `quotechar` handle regional CSV formats.
-
-JSON loading:
-
-```python
-df = pd.read_json("books.json", orient="records")
-df = pd.read_json("events.ndjson", lines=True)
-```
-
-For nested JSON, normalize before building a DataFrame:
-
-```python
-records = [
-    {"id": 1, "author": {"name": "Frank Herbert", "country": "US"}},
-    {"id": 2, "author": {"name": "Jane Austen", "country": "UK"}},
-]
-df = pd.json_normalize(records)
-# columns: id, author.name, author.country
-```
-
-Inspection:
-
-```python
-df.head()
-df.tail()
-df.sample(5, random_state=42)
-df.info()                 # columns, non-null counts, dtypes, memory
-df.describe()             # numeric summaries
-df.describe(include="all")
-df.shape
-df.columns
-df.dtypes
-df.isna().sum()
-df["title"].value_counts(dropna=False)
-df.nunique()
-```
-
-Missing values:
-
-```python
-df.isna()
-df.notna()
-df.dropna()                                  # any column missing
-df.dropna(how="all")                         # drop only fully empty rows
-df.dropna(subset=["title", "price_cents"])   # require key fields
-df.fillna({"price_cents": 0, "title": "unknown"})
-df["price_cents"].fillna(df["price_cents"].median())
-df["price_cents"].ffill()
-```
-
-- `NaN` is a float; integer columns with missing values become float unless you use nullable dtypes.
-- `pd.NA` is pandas' nullable missing value; `Int64`, `boolean`, and `string` dtypes use it.
-- `np.nan == np.nan` is false. Use `isna()`.
-- `pd.NA == pd.NA` produces `pd.NA`, which is not a valid boolean; use `isna()` too.
-
-Dtype conversion:
-
-```python
-df["price_cents"] = pd.to_numeric(df["price_cents"], errors="coerce")
-df["published_at"] = pd.to_datetime(df["published_at"], errors="coerce")
-df["isbn"] = df["isbn"].astype("string")
-df["category"] = df["category"].astype("category")
-```
-
-`errors="coerce"` turns unparseable values into missing values. Without it, conversion raises. Decide deliberately which behavior you want, and log how many values were coerced.
-
-Duplicates:
-
-```python
-df.duplicated().sum()
-df.duplicated(subset=["isbn"]).sum()
-df.drop_duplicates()
-df.drop_duplicates(subset=["isbn"], keep="last")
-```
-
-A duplicate key before a merge silently multiplies rows. Check keys before joining.
-
-Schema checks before modeling:
-
-```python
-required = {"isbn", "title", "price_cents"}
-missing = required - set(df.columns)
-if missing:
-    raise ValueError(f"missing columns: {sorted(missing)}")
-
-if not df["isbn"].is_unique:
-    raise ValueError("isbn must be unique")
-```
-
-Libraries such as pandera can formalize these checks; plain assertions are enough to start.
-
----
-
-## 7.7 Transformations, strings, dates, and grouping
-
-Column operations:
-
-```python
-df = df.assign(
-    price_dollars=df["price_cents"] / 100,
-    title_upper=df["title"].str.upper(),
-)
-df = df.rename(columns={"price_cents": "price_cents"})
-df = df.drop(columns=["unused"])
-df = df[["isbn", "title", "price_dollars"]]
-df = df.sort_values(["in_stock", "price_cents"], ascending=[False, True])
-```
-
-`apply` is flexible but slow:
-
-```python
-df["title_length"] = df["title"].apply(len)          # Series.apply
-df["score"] = df.apply(lambda row: row["a"] + row["b"], axis=1)   # row-wise, slow
-```
-
-Prefer vectorized operations, `.str` methods, `.dt` accessors, `np.where`, and `map` when possible.
-
-String methods:
-
-```python
-df["title"].str.lower()
-df["title"].str.contains("dune", case=False, na=False)
-df["title"].str.startswith("The")
-df["title"].str.strip()
-df["tags"].str.split(",")
-df["tags"].str.split(",").explode()          # one row per tag
-df["title"].str.extract(r"^(?P<series>[A-Za-z]+) #(?P<number>\d+)$")
-df["title"].str.replace(r"\s+", " ", regex=True)
-```
-
-Datetime:
-
-```python
-df["published_at"] = pd.to_datetime(df["published_at"], utc=True)
-df["year"] = df["published_at"].dt.year
-df["month"] = df["published_at"].dt.month
-df["weekday"] = df["published_at"].dt.day_name()
-df["age_days"] = (pd.Timestamp.now(tz="UTC") - df["published_at"]).dt.days
-df["published_month"] = df["published_at"].dt.to_period("M")
-```
-
-Binning and categoricals:
-
-```python
-df["price_band"] = pd.cut(
-    df["price_cents"],
-    bins=[0, 1000, 2000, float("inf")],
-    labels=["cheap", "mid", "expensive"],
-    right=False,
-)
-df["quartile"] = pd.qcut(df["price_cents"], q=4, labels=False)
-df["category"] = df["category"].astype("category")
-```
-
-Grouping follows split-apply-combine:
-
-```python
-df.groupby("category")["price_cents"].mean()
-df.groupby(["category", "in_stock"]).size()
-df.groupby("category").agg(
-    count=("isbn", "size"),
-    mean_price=("price_cents", "mean"),
-    max_price=("price_cents", "max"),
-)
-df.groupby("category")["price_cents"].transform("mean")   # same index as df
-df.groupby("category").filter(lambda g: len(g) > 10)
-```
-
-- `size()` counts rows including missing group keys; `count()` counts non-null values per column.
-- `transform` returns a result aligned to the original index, suitable for adding a column.
-- `agg` with named aggregation gives clear column names.
-- For categorical group keys, pass `observed=True` explicitly if you want only observed categories. Modern pandas defaults to that behavior; older versions may warn.
-
-Useful aggregations: `sum`, `mean`, `median`, `min`, `max`, `std`, `var`, `count`, `nunique`, `first`, `last`.
-
----
-
-## 7.8 Joins, concatenation, and reshaping
-
-Merge:
-
-```python
-books = pd.DataFrame({"isbn": ["a", "b"], "title": ["Dune", "Emma"]})
-sales = pd.DataFrame({"isbn": ["a", "a", "c"], "units": [2, 3, 1]})
-
-pd.merge(books, sales, on="isbn", how="inner")
-pd.merge(books, sales, on="isbn", how="left")
-pd.merge(books, sales, on="isbn", how="outer", indicator=True)
-```
-
-Merge rules:
-
-- `how`: `inner`, `left`, `right`, `outer`, `cross`.
-- `on` must exist in both frames; `left_on`/`right_on` handle different names.
-- `suffixes` resolves overlapping non-key columns.
-- `validate` catches cardinality mistakes: `"one_to_one"`, `"one_to_many"`, `"many_to_one"`, `"many_to_many"`.
-- `indicator=True` adds `_merge` with `left_only`, `right_only`, or `both`.
-- If the right frame has duplicate keys, a left join multiplies rows. Check uniqueness first.
-- Merge keys should have compatible dtypes. `1` and `"1"` do not match.
-
-Set operations:
-
-```python
-books.merge(sales, on="isbn", how="left", indicator=True).query("_merge == 'left_only'")
-books[books["isbn"].isin(sales["isbn"])]
-```
-
-Concatenation:
-
-```python
-pd.concat([df1, df2], ignore_index=True)          # rows
-pd.concat([df1, df2], axis=1)                     # columns, aligned by index
-pd.concat([df1, df2], keys=["train", "test"])     # MultiIndex labels
-```
-
-Column-wise concatenation aligns on the index. Row-wise concatenation aligns on columns; missing columns become NaN unless you validate them first.
-
-Reshaping:
-
-```python
-long = df.melt(
-    id_vars=["isbn"],
-    value_vars=["price_q1", "price_q2"],
-    var_name="quarter",
-    value_name="price",
-)
-
-wide = long.pivot(index="isbn", columns="quarter", values="price")
-summary = df.pivot_table(
-    index="category",
-    columns="in_stock",
-    values="price_cents",
-    aggfunc="mean",
-    fill_value=0,
-)
-```
-
-`pivot` fails on duplicate index/column pairs; `pivot_table` aggregates them. Validate that the reshape did not silently drop or duplicate rows.
-
----
-
-## 7.9 Summaries, splits, reproducibility, and leakage
-
-Exploratory summaries:
-
-```python
-df.describe()
-df["price_cents"].mean(), df["price_cents"].median()
-df["price_cents"].quantile([0.25, 0.5, 0.75, 0.95])
-df["category"].value_counts(normalize=True, dropna=False)
-pd.crosstab(df["category"], df["in_stock"], normalize="index")
-df[["price_cents", "pages"]].corr(method="pearson")
-df[["price_cents", "pages"]].corr(method="spearman")
-```
-
-Correlation is not causation and Pearson only captures linear relationships. Check scatter plots and group-level patterns. For categorical targets, compare distributions across classes and slices.
-
-Outliers:
-
-```python
-q1, q3 = df["price_cents"].quantile([0.25, 0.75])
-iqr = q3 - q1
-lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-outliers = df[(df["price_cents"] < lower) | (df["price_cents"] > upper)]
-```
-
-Do not delete outliers by reflex; they may be valid or the most important examples. Decide based on the problem and document the rule.
-
-Reproducible splits:
-
-```python
-rng = np.random.default_rng(42)
-indices = rng.permutation(len(df))
-n_train = int(0.8 * len(df))
-train_idx = indices[:n_train]
-test_idx = indices[n_train:]
-
-train = df.iloc[train_idx].copy()
-test = df.iloc[test_idx].copy()
-```
-
-Or use scikit-learn:
-
-```python
-from sklearn.model_selection import train_test_split
-
-train, test = train_test_split(
-    df,
-    test_size=0.2,
-    random_state=42,
-    stratify=df["label"],
-)
-```
-
-- Set and record a seed. `random_state` on every stochastic operation.
-- Stratify classification splits to preserve class proportions.
-- Group splits keep all rows from one entity (patient, user, document) in one split. Random row splits leak information across splits when rows are correlated.
-- Time-based splits: train on the past, test on the future. Never shuffle time series across the boundary.
-- Split before fitting imputers, scalers, encoders, feature selectors, and target encoders. Fit on train only.
-- Duplicate rows across train and test inflate scores. Deduplicate before splitting or group by content.
-
-Leakage examples:
-
-- A feature derived from the target (for example, `refund_amount` when predicting `refunded`).
-- Aggregate statistics computed on the full dataset (mean imputation, scaling, target encoding).
-- Future information (using next month's totals to predict this month).
-- IDs that encode the outcome or time.
-- Rows from the same user or document in both train and test.
-- Selecting features using the full dataset before splitting.
-
-A safe preprocessing sequence:
-
-```text
-split rows (grouped/stratified/time-aware)
-→ fit imputer/scaler/encoder on train
-→ transform train and test with the fitted objects
-→ fit model on train
-→ evaluate on test
-```
-
-Save preprocessing with the model (a pipeline or an artifact directory) so inference uses identical transformations. Record data version, schema, seed, and split logic.
-
----
-
-## 7.10 Common mistakes and conventions
-
-Mistakes to avoid:
-
-1. Chained assignment (`df["a"][mask] = x`); use `.loc`.
-2. Comparing to `np.nan` or `pd.NA` instead of using `isna()`.
-3. Using `and`/`or` instead of `&`/`|` on boolean Series/arrays.
-4. Forgetting parentheses around conditions.
-5. Assuming DataFrame arithmetic aligns by position instead of by label.
-6. Letting pandas infer IDs or dates from CSV and losing leading zeros or timezones.
-7. Using `float` for money; store integer cents or `Decimal`.
-8. Using `iterrows()` or row-wise `apply` for large data instead of vectorized operations.
-9. Dropping rows with any missing value before understanding why they are missing.
-10. Filling missing values with statistics computed on the full dataset before splitting.
-11. Merging without checking key uniqueness and silently multiplying rows.
-12. Ignoring dtype changes after a merge or concat.
-13. Splitting randomly when rows are grouped by user, patient, or document.
-14. Shuffling time-ordered data.
-15. Deleting outliers without documenting a rule.
-16. Forgetting `random_state`/seed and getting unreproducible splits.
-17. Treating correlation as causation or assuming Pearson captures nonlinearity.
-18. Exposing a DataFrame's index or internal columns as model features by accident.
-
-Conventions to adopt:
-
-- Load with explicit dtypes, date parsing, and missing-value tokens.
-- Validate schema, key uniqueness, and row counts at every stage.
-- Keep raw data immutable; write transformed data to new frames/files.
-- Prefer vectorized operations; measure before optimizing.
-- Name columns clearly and avoid spaces/duplicates.
-- Split first, fit preprocessing on train, then transform the rest.
-- Log shapes, missingness, and class balance per split.
-- Store seed, data version, and transformation code together.
-- Test transformation functions on small, hand-checked frames.
-
----
-
 # Exercises
 
 Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
@@ -960,6 +311,98 @@ labels = np.array([0, 2, 1, 2])
 ```
 
 Use `np.eye` and fancy indexing. Then explain why this is more efficient than a Python loop.
+
+---
+
+## 7.3 Indexing, slicing, views, and copies
+
+1D indexing and slicing:
+
+```python
+a = np.array([10, 20, 30, 40, 50])
+
+a[0]          # 10
+a[-1]         # 50
+a[1:4]        # [20 30 40]
+a[::2]        # [10 30 50]
+a[::-1]       # reversed
+```
+
+2D indexing:
+
+```python
+m = np.array([[1, 2, 3],
+              [4, 5, 6]])
+
+m[0, 1]       # 2 (row 0, column 1)
+m[1]          # row 1: [4 5 6]
+m[:, 1]       # column 1: [2 5]
+m[0:2, 1:]    # submatrix [[2, 3], [5, 6]]
+m[..., 0]     # all preceding axes, index 0 on the last axis
+```
+
+Boolean masks:
+
+```python
+a = np.array([1, 2, 3, 4])
+mask = a > 2
+a[mask]                  # [3 4]
+a[a % 2 == 0]            # [2 4]
+a[(a > 1) & (a < 4)]     # parentheses are required with & and |
+```
+
+Use `&`, `|`, and `~` for elementwise boolean logic. Python's `and`, `or`, and `not` do not work on arrays.
+
+Fancy indexing:
+
+```python
+a[[0, 2, 3]]             # [1 3 4]
+a[[-1, 0]]               # [4 1]
+m[[0, 1], [2, 0]]        # [3, 4]: pairs (0,2) and (1,0)
+```
+
+Views versus copies:
+
+- Basic slicing (`a[1:4]`, `m[:, 0]`) returns a view: changing it changes the original.
+- Boolean masks and fancy indexing return copies: changing the result does not change the original.
+- `reshape` and `ravel` return a view when possible; `flatten` and `.copy()` always copy.
+
+```python
+a = np.arange(6)
+view = a[::2]
+view[0] = 99
+print(a)                 # [99 1 2 3 4 5]
+
+copy = a[[0, 2]]
+copy[0] = -1
+print(a)                 # unchanged at that position
+```
+
+Assignment with masks:
+
+```python
+a = np.array([1, -2, 3, -4])
+a[a < 0] = 0             # [1 0 3 0]
+```
+
+`np.where` selects elementwise:
+
+```python
+np.where(a > 0, a, 0)
+```
+
+Sorting and searching:
+
+```python
+a = np.array([3, 1, 2])
+np.sort(a)               # returns a sorted copy
+a.sort()                 # sorts in place
+np.argsort(a)            # indices that would sort
+a.argmax(), a.argmin()
+np.unique(a, return_counts=True)
+```
+
+`np.isnan(a)` builds a mask; `a == np.nan` is always false.
 
 ---
 
@@ -1174,6 +617,97 @@ a[1:3] = [10, 20, 30]
 What happens, and why is the shape of the assignment important?
 
 **B24.** Write a function that returns a copy of an array with all values above the 95th percentile clipped to that percentile. Answer whether clipping should be computed on the whole array or on training data only in an ML pipeline.
+
+---
+
+## 7.4 Broadcasting, vectorization, and reductions
+
+Broadcasting aligns shapes from the right. Two dimensions are compatible if they are equal or one of them is `1`.
+
+```python
+m = np.array([[1, 2, 3],
+              [4, 5, 6]])        # shape (2, 3)
+
+m + 10                          # scalar broadcast
+m + np.array([10, 20, 30])      # (3,) broadcasts across rows
+m + np.array([[10], [20]])      # (2, 1) broadcasts across columns
+m * 2
+m / 2
+```
+
+Incompatible shapes raise `ValueError`:
+
+```python
+np.ones((2, 3)) + np.ones((2, 2))   # ValueError
+```
+
+Reductions and `axis`:
+
+```python
+m.sum()             # all elements
+m.sum(axis=0)       # per column, result shape (3,)
+m.sum(axis=1)       # per row, result shape (2,)
+m.mean(axis=0, keepdims=True)   # shape (1, 3)
+```
+
+- `axis=0` reduces rows, producing one value per column.
+- `axis=1` reduces columns, producing one value per row.
+- `keepdims=True` preserves the reduced dimension as length 1, which helps with broadcasting.
+
+NumPy reductions use `ddof=0` by default for standard deviation (population). pandas uses `ddof=1` (sample). Do not compare them casually.
+
+```python
+a = np.array([1.0, 2.0, np.nan])
+a.mean()          # nan
+np.nanmean(a)     # 1.5
+np.nansum(a)      # 3.0
+```
+
+Vectorization:
+
+```python
+a = np.arange(1_000_000)
+
+total = 0
+for x in a:              # slow Python loop
+    total += x
+
+total = a.sum()          # fast C loop
+```
+
+Use ufuncs and array expressions (`a * 2 + 1`, `np.sqrt(a)`, `np.clip(a, 0, 1)`) instead of Python loops. Vectorized code is shorter, faster, and less error-prone, but it materializes intermediate arrays; for very large data, process in batches.
+
+Matrix operations:
+
+```python
+A = np.array([[1, 2], [3, 4]])
+B = np.array([[5, 6], [7, 8]])
+
+A * B            # elementwise
+A @ B            # matrix product
+np.dot(A, B)     # matrix product for 2D
+```
+
+Use `@` for matrix multiplication. `*` is always elementwise.
+
+A useful broadcasting example, row normalization:
+
+```python
+rows = np.array([[1.0, 2.0], [3.0, 4.0]])
+totals = rows.sum(axis=1, keepdims=True)   # shape (2, 1)
+normalized = rows / totals                 # (2, 2) / (2, 1)
+```
+
+Numerically stable softmax:
+
+```python
+def softmax(logits: np.ndarray) -> np.ndarray:
+    shifted = logits - logits.max(axis=-1, keepdims=True)
+    exp = np.exp(shifted)
+    return exp / exp.sum(axis=-1, keepdims=True)
+```
+
+Subtracting the maximum prevents overflow. Broadcast along the last axis with `keepdims=True`.
 
 ---
 
@@ -1395,6 +929,90 @@ Then state which dimensions were broadcast.
 **C23.** A function receives `x` of shape `(n,)` or `(n, 1)`. Write code that produces a column vector of shape `(n, 1)` in both cases, then explain why `reshape(-1, 1)` is often clearer than adding dimensions manually.
 
 **C24.** Implement `batch_mean` that processes a large array in chunks along axis 0 and computes the overall mean without concatenating the chunks. State why the chunk size affects memory but not the result.
+
+---
+
+## 7.5 pandas Series, DataFrames, and alignment
+
+```python
+import pandas as pd
+
+s = pd.Series([10, 20, 30], index=["a", "b", "c"], name="score")
+df = pd.DataFrame({
+    "title": ["Dune", "Emma", "Dracula"],
+    "price_cents": [1999, 899, 1299],
+    "in_stock": [True, True, False],
+})
+```
+
+Key attributes:
+
+```python
+s.values        # NumPy array (use s.to_numpy() for clarity)
+s.index         # Index(['a', 'b', 'c'])
+s.name          # 'score'
+df.columns      # Index([...])
+df.index        # RangeIndex(start=0, stop=3, step=1)
+df.shape        # (3, 3)
+df.dtypes       # dtype per column
+```
+
+Selection:
+
+```python
+df["title"]              # Series
+df[["title", "price_cents"]]   # DataFrame
+df.loc[0, "title"]       # label-based; row label 0, column label "title"
+df.iloc[0, 1]            # position-based; row 0, column 1
+df.loc[df["in_stock"], ["title"]]
+df.iloc[0:2, 0:2]
+```
+
+- `.loc` uses labels. Slices include both endpoints.
+- `.iloc` uses integer positions. Slices follow Python's exclusive-end rule.
+- `df[boolean_series]` filters rows.
+- `df["col"] = value` assigns a column.
+- `df.loc[mask, "col"] = value` assigns conditionally.
+
+Multiple conditions require parentheses:
+
+```python
+df[(df["price_cents"] > 1000) & df["in_stock"]]
+df[df["title"].isin(["Dune", "Emma"])]
+df.query("price_cents > 1000 and in_stock")
+```
+
+Index alignment is a core pandas semantic. Operations combine rows by index label, not by position:
+
+```python
+a = pd.Series([1, 2], index=["x", "y"])
+b = pd.Series([10, 20], index=["y", "x"])
+a + b
+# x    21
+# y    22
+```
+
+If labels do not match, the result includes the union of labels with missing values:
+
+```python
+c = pd.Series([1, 2], index=["x", "y"])
+d = pd.Series([10], index=["y"])
+c + d
+# x    NaN
+# y     12
+```
+
+Use `.reindex()`, `.reset_index(drop=True)`, or `.align()` when you need explicit control.
+
+Copy-on-write and chained assignment:
+
+```python
+df["price_cents"][0] = 1          # does not update df; raises ChainedAssignmentError warning
+df.loc[0, "price_cents"] = 1      # correct
+df.loc[df["in_stock"], "price_cents"] = 999
+```
+
+Pandas 3 enables copy-on-write by default, and pandas 2.x can enable it. Under copy-on-write, a chained assignment such as `df["col"][mask] = value` modifies a temporary object and never updates the original DataFrame. Always assign through `.loc` in one step. Methods such as `drop`, `rename`, and `assign` return new objects; `inplace=True` is discouraged.
 
 ---
 
@@ -1707,6 +1325,120 @@ Then explain how to reset an index without turning it into a column.
 3. When is transposing a DataFrame a sign that the data shape is wrong?
 4. What is the pandas equivalent of a NumPy transpose?
 
+## 7.6 Loading, inspecting, and cleaning data
+
+CSV loading:
+
+```python
+df = pd.read_csv(
+    "books.csv",
+    usecols=["isbn", "title", "price_cents", "published_at"],
+    dtype={"isbn": "string", "price_cents": "Int64"},
+    parse_dates=["published_at"],
+    na_values=["", "NA", "N/A", "null"],
+)
+```
+
+Useful options:
+
+- `dtype` prevents unwanted inference. IDs with leading zeros must be strings: otherwise `"00123"` becomes `123`.
+- `parse_dates` converts date columns. Without it, dates remain strings.
+- `na_values` declares which tokens mean missing.
+- `usecols` reduces memory and catches schema drift early.
+- `nrows` is useful for inspection; `chunksize` streams large files.
+- `sep`, `decimal`, `encoding`, and `quotechar` handle regional CSV formats.
+
+JSON loading:
+
+```python
+df = pd.read_json("books.json", orient="records")
+df = pd.read_json("events.ndjson", lines=True)
+```
+
+For nested JSON, normalize before building a DataFrame:
+
+```python
+records = [
+    {"id": 1, "author": {"name": "Frank Herbert", "country": "US"}},
+    {"id": 2, "author": {"name": "Jane Austen", "country": "UK"}},
+]
+df = pd.json_normalize(records)
+# columns: id, author.name, author.country
+```
+
+Inspection:
+
+```python
+df.head()
+df.tail()
+df.sample(5, random_state=42)
+df.info()                 # columns, non-null counts, dtypes, memory
+df.describe()             # numeric summaries
+df.describe(include="all")
+df.shape
+df.columns
+df.dtypes
+df.isna().sum()
+df["title"].value_counts(dropna=False)
+df.nunique()
+```
+
+Missing values:
+
+```python
+df.isna()
+df.notna()
+df.dropna()                                  # any column missing
+df.dropna(how="all")                         # drop only fully empty rows
+df.dropna(subset=["title", "price_cents"])   # require key fields
+df.fillna({"price_cents": 0, "title": "unknown"})
+df["price_cents"].fillna(df["price_cents"].median())
+df["price_cents"].ffill()
+```
+
+- `NaN` is a float; integer columns with missing values become float unless you use nullable dtypes.
+- `pd.NA` is pandas' nullable missing value; `Int64`, `boolean`, and `string` dtypes use it.
+- `np.nan == np.nan` is false. Use `isna()`.
+- `pd.NA == pd.NA` produces `pd.NA`, which is not a valid boolean; use `isna()` too.
+
+Dtype conversion:
+
+```python
+df["price_cents"] = pd.to_numeric(df["price_cents"], errors="coerce")
+df["published_at"] = pd.to_datetime(df["published_at"], errors="coerce")
+df["isbn"] = df["isbn"].astype("string")
+df["category"] = df["category"].astype("category")
+```
+
+`errors="coerce"` turns unparseable values into missing values. Without it, conversion raises. Decide deliberately which behavior you want, and log how many values were coerced.
+
+Duplicates:
+
+```python
+df.duplicated().sum()
+df.duplicated(subset=["isbn"]).sum()
+df.drop_duplicates()
+df.drop_duplicates(subset=["isbn"], keep="last")
+```
+
+A duplicate key before a merge silently multiplies rows. Check keys before joining.
+
+Schema checks before modeling:
+
+```python
+required = {"isbn", "title", "price_cents"}
+missing = required - set(df.columns)
+if missing:
+    raise ValueError(f"missing columns: {sorted(missing)}")
+
+if not df["isbn"].is_unique:
+    raise ValueError("isbn must be unique")
+```
+
+Libraries such as pandera can formalize these checks; plain assertions are enough to start.
+
+---
+
 ## Group F — Loading, inspecting, and cleaning data
 
 **F1.** A CSV has a header row, comma separators, and an `isbn` column containing values like `"00123"`. Predict what happens with `pd.read_csv("books.csv")` and explain three ways the leading zeros can be lost or preserved.
@@ -1862,6 +1594,90 @@ Then explain how to flatten a list of tags into one row per tag.
 
 ---
 
+## 7.7 Transformations, strings, dates, and grouping
+
+Column operations:
+
+```python
+df = df.assign(
+    price_dollars=df["price_cents"] / 100,
+    title_upper=df["title"].str.upper(),
+)
+df = df.rename(columns={"price_cents": "price_cents"})
+df = df.drop(columns=["unused"])
+df = df[["isbn", "title", "price_dollars"]]
+df = df.sort_values(["in_stock", "price_cents"], ascending=[False, True])
+```
+
+`apply` is flexible but slow:
+
+```python
+df["title_length"] = df["title"].apply(len)          # Series.apply
+df["score"] = df.apply(lambda row: row["a"] + row["b"], axis=1)   # row-wise, slow
+```
+
+Prefer vectorized operations, `.str` methods, `.dt` accessors, `np.where`, and `map` when possible.
+
+String methods:
+
+```python
+df["title"].str.lower()
+df["title"].str.contains("dune", case=False, na=False)
+df["title"].str.startswith("The")
+df["title"].str.strip()
+df["tags"].str.split(",")
+df["tags"].str.split(",").explode()          # one row per tag
+df["title"].str.extract(r"^(?P<series>[A-Za-z]+) #(?P<number>\d+)$")
+df["title"].str.replace(r"\s+", " ", regex=True)
+```
+
+Datetime:
+
+```python
+df["published_at"] = pd.to_datetime(df["published_at"], utc=True)
+df["year"] = df["published_at"].dt.year
+df["month"] = df["published_at"].dt.month
+df["weekday"] = df["published_at"].dt.day_name()
+df["age_days"] = (pd.Timestamp.now(tz="UTC") - df["published_at"]).dt.days
+df["published_month"] = df["published_at"].dt.to_period("M")
+```
+
+Binning and categoricals:
+
+```python
+df["price_band"] = pd.cut(
+    df["price_cents"],
+    bins=[0, 1000, 2000, float("inf")],
+    labels=["cheap", "mid", "expensive"],
+    right=False,
+)
+df["quartile"] = pd.qcut(df["price_cents"], q=4, labels=False)
+df["category"] = df["category"].astype("category")
+```
+
+Grouping follows split-apply-combine:
+
+```python
+df.groupby("category")["price_cents"].mean()
+df.groupby(["category", "in_stock"]).size()
+df.groupby("category").agg(
+    count=("isbn", "size"),
+    mean_price=("price_cents", "mean"),
+    max_price=("price_cents", "max"),
+)
+df.groupby("category")["price_cents"].transform("mean")   # same index as df
+df.groupby("category").filter(lambda g: len(g) > 10)
+```
+
+- `size()` counts rows including missing group keys; `count()` counts non-null values per column.
+- `transform` returns a result aligned to the original index, suitable for adding a column.
+- `agg` with named aggregation gives clear column names.
+- For categorical group keys, pass `observed=True` explicitly if you want only observed categories. Modern pandas defaults to that behavior; older versions may warn.
+
+Useful aggregations: `sum`, `mean`, `median`, `min`, `max`, `std`, `var`, `count`, `nunique`, `first`, `last`.
+
+---
+
 ## Group G — Transformations, strings, dates, and grouping
 
 **G1.** Given a DataFrame, write one `assign` call that adds:
@@ -2005,6 +1821,70 @@ State which operations use the `.str` accessor.
 
 ---
 
+## 7.8 Joins, concatenation, and reshaping
+
+Merge:
+
+```python
+books = pd.DataFrame({"isbn": ["a", "b"], "title": ["Dune", "Emma"]})
+sales = pd.DataFrame({"isbn": ["a", "a", "c"], "units": [2, 3, 1]})
+
+pd.merge(books, sales, on="isbn", how="inner")
+pd.merge(books, sales, on="isbn", how="left")
+pd.merge(books, sales, on="isbn", how="outer", indicator=True)
+```
+
+Merge rules:
+
+- `how`: `inner`, `left`, `right`, `outer`, `cross`.
+- `on` must exist in both frames; `left_on`/`right_on` handle different names.
+- `suffixes` resolves overlapping non-key columns.
+- `validate` catches cardinality mistakes: `"one_to_one"`, `"one_to_many"`, `"many_to_one"`, `"many_to_many"`.
+- `indicator=True` adds `_merge` with `left_only`, `right_only`, or `both`.
+- If the right frame has duplicate keys, a left join multiplies rows. Check uniqueness first.
+- Merge keys should have compatible dtypes. `1` and `"1"` do not match.
+
+Set operations:
+
+```python
+books.merge(sales, on="isbn", how="left", indicator=True).query("_merge == 'left_only'")
+books[books["isbn"].isin(sales["isbn"])]
+```
+
+Concatenation:
+
+```python
+pd.concat([df1, df2], ignore_index=True)          # rows
+pd.concat([df1, df2], axis=1)                     # columns, aligned by index
+pd.concat([df1, df2], keys=["train", "test"])     # MultiIndex labels
+```
+
+Column-wise concatenation aligns on the index. Row-wise concatenation aligns on columns; missing columns become NaN unless you validate them first.
+
+Reshaping:
+
+```python
+long = df.melt(
+    id_vars=["isbn"],
+    value_vars=["price_q1", "price_q2"],
+    var_name="quarter",
+    value_name="price",
+)
+
+wide = long.pivot(index="isbn", columns="quarter", values="price")
+summary = df.pivot_table(
+    index="category",
+    columns="in_stock",
+    values="price_cents",
+    aggfunc="mean",
+    fill_value=0,
+)
+```
+
+`pivot` fails on duplicate index/column pairs; `pivot_table` aggregates them. Validate that the reshape did not silently drop or duplicate rows.
+
+---
+
 ## Group H — Joins, concatenation, and reshaping
 
 **H1.** Given `books` and `sales` with a shared `isbn` column, predict the result of an inner merge. Answer:
@@ -2075,6 +1955,89 @@ State which operations use the `.str` accessor.
 **H21.** Explain the difference between `stack` and `unstack` conceptually. Answer what happens to the index and columns, and why modern pandas encourages `melt`/`pivot` for many reshaping tasks.
 
 **H22.** Before merging a product table with a sales table, write the checks you would run on key uniqueness, dtypes, missing values, and expected row counts. Then explain which check should run in production and which can stay in tests.
+
+---
+
+## 7.9 Summaries, splits, reproducibility, and leakage
+
+Exploratory summaries:
+
+```python
+df.describe()
+df["price_cents"].mean(), df["price_cents"].median()
+df["price_cents"].quantile([0.25, 0.5, 0.75, 0.95])
+df["category"].value_counts(normalize=True, dropna=False)
+pd.crosstab(df["category"], df["in_stock"], normalize="index")
+df[["price_cents", "pages"]].corr(method="pearson")
+df[["price_cents", "pages"]].corr(method="spearman")
+```
+
+Correlation is not causation and Pearson only captures linear relationships. Check scatter plots and group-level patterns. For categorical targets, compare distributions across classes and slices.
+
+Outliers:
+
+```python
+q1, q3 = df["price_cents"].quantile([0.25, 0.75])
+iqr = q3 - q1
+lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+outliers = df[(df["price_cents"] < lower) | (df["price_cents"] > upper)]
+```
+
+Do not delete outliers by reflex; they may be valid or the most important examples. Decide based on the problem and document the rule.
+
+Reproducible splits:
+
+```python
+rng = np.random.default_rng(42)
+indices = rng.permutation(len(df))
+n_train = int(0.8 * len(df))
+train_idx = indices[:n_train]
+test_idx = indices[n_train:]
+
+train = df.iloc[train_idx].copy()
+test = df.iloc[test_idx].copy()
+```
+
+Or use scikit-learn:
+
+```python
+from sklearn.model_selection import train_test_split
+
+train, test = train_test_split(
+    df,
+    test_size=0.2,
+    random_state=42,
+    stratify=df["label"],
+)
+```
+
+- Set and record a seed. `random_state` on every stochastic operation.
+- Stratify classification splits to preserve class proportions.
+- Group splits keep all rows from one entity (patient, user, document) in one split. Random row splits leak information across splits when rows are correlated.
+- Time-based splits: train on the past, test on the future. Never shuffle time series across the boundary.
+- Split before fitting imputers, scalers, encoders, feature selectors, and target encoders. Fit on train only.
+- Duplicate rows across train and test inflate scores. Deduplicate before splitting or group by content.
+
+Leakage examples:
+
+- A feature derived from the target (for example, `refund_amount` when predicting `refunded`).
+- Aggregate statistics computed on the full dataset (mean imputation, scaling, target encoding).
+- Future information (using next month's totals to predict this month).
+- IDs that encode the outcome or time.
+- Rows from the same user or document in both train and test.
+- Selecting features using the full dataset before splitting.
+
+A safe preprocessing sequence:
+
+```text
+split rows (grouped/stratified/time-aware)
+→ fit imputer/scaler/encoder on train
+→ transform train and test with the fitted objects
+→ fit model on train
+→ evaluate on test
+```
+
+Save preprocessing with the model (a pipeline or an artifact directory) so inference uses identical transformations. Record data version, schema, seed, and split logic.
 
 ---
 
@@ -2183,6 +2146,43 @@ State which operations use the `.str` accessor.
 **I21.** Build a leakage checklist for a tabular ML project. Include split strategy, preprocessing fit scope, duplicate handling, time boundaries, target-derived features, ID features, and evaluation probes.
 
 **I22.** You perform extensive EDA, choose features based on it, and then split the data. Answer why this can bias evaluation and what discipline reduces the risk. Then state whether EDA is forbidden before splitting.
+
+---
+
+## 7.10 Common mistakes and conventions
+
+Mistakes to avoid:
+
+1. Chained assignment (`df["a"][mask] = x`); use `.loc`.
+2. Comparing to `np.nan` or `pd.NA` instead of using `isna()`.
+3. Using `and`/`or` instead of `&`/`|` on boolean Series/arrays.
+4. Forgetting parentheses around conditions.
+5. Assuming DataFrame arithmetic aligns by position instead of by label.
+6. Letting pandas infer IDs or dates from CSV and losing leading zeros or timezones.
+7. Using `float` for money; store integer cents or `Decimal`.
+8. Using `iterrows()` or row-wise `apply` for large data instead of vectorized operations.
+9. Dropping rows with any missing value before understanding why they are missing.
+10. Filling missing values with statistics computed on the full dataset before splitting.
+11. Merging without checking key uniqueness and silently multiplying rows.
+12. Ignoring dtype changes after a merge or concat.
+13. Splitting randomly when rows are grouped by user, patient, or document.
+14. Shuffling time-ordered data.
+15. Deleting outliers without documenting a rule.
+16. Forgetting `random_state`/seed and getting unreproducible splits.
+17. Treating correlation as causation or assuming Pearson captures nonlinearity.
+18. Exposing a DataFrame's index or internal columns as model features by accident.
+
+Conventions to adopt:
+
+- Load with explicit dtypes, date parsing, and missing-value tokens.
+- Validate schema, key uniqueness, and row counts at every stage.
+- Keep raw data immutable; write transformed data to new frames/files.
+- Prefer vectorized operations; measure before optimizing.
+- Name columns clearly and avoid spaces/duplicates.
+- Split first, fit preprocessing on train, then transform the rest.
+- Log shapes, missingness, and class balance per split.
+- Store seed, data version, and transformation code together.
+- Test transformation functions on small, hand-checked frames.
 
 ---
 
@@ -2328,4 +2328,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Detect and explain leakage from target-derived features, full-data statistics, duplicates, and future information.
 - Test transformations and splits on small, hand-checked frames and record seeds, schema, and data versions.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 8.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 8](../chapter-8/ml-foundations.md).

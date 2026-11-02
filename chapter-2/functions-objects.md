@@ -98,512 +98,6 @@ TypeScript comparison: each Python file is a namespace like an ES module, but th
 
 ---
 
-## 2.2 Classes and instances
-
-A class bundles data and behavior. `__init__` initializes a new instance; `self` is the instance and is always the first parameter of instance methods. Unlike TypeScript, there is no implicit `this` — it is passed explicitly and can be named anything, though `self` is a hard convention.
-
-```python
-class Point:
-    kind = "point"                  # class attribute: shared by all instances
-
-    def __init__(self, x, y):
-        self.x = x                  # instance attributes: per-instance
-        self.y = y
-
-    def distance_to(self, other):
-        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
-
-p = Point(3, 4)
-print(p.x, p.kind)
-print(p.distance_to(Point(0, 0)))
-```
-
-Key semantics:
-
-- Attributes are created by assignment. There are no field declarations and no required `__init__`; `Point.__init__` is how instances normally get their attributes.
-- Attribute lookup checks the instance first, then the class. Assigning `p.kind = "dot"` creates an *instance* attribute shadowing the class attribute; the class itself is unchanged.
-- Mutable class attributes are shared by every instance — the same aliasing trap as Chapter 1:
-
-```python
-class Bad:
-    items = []                      # shared across all instances
-
-a, b = Bad(), Bad()
-a.items.append(1)
-print(b.items)                      # [1] -- probably not what was intended
-```
-
-- Methods are just functions; `p.distance_to(q)` is sugar for `Point.distance_to(p, q)`.
-- `self` is not a keyword. Forgetting it in a definition produces a `TypeError` at the call site, not at definition time.
-
-### `__repr__`, `__str__`, and `__eq__`
-
-Default representations are useless for debugging (`<Point object at 0x...>`), and default equality is identity:
-
-```python
-print(Point(1, 2) == Point(1, 2))   # False -- different objects, no __eq__
-```
-
-Implement the dunders you actually need:
-
-```python
-class Point:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
-    def __repr__(self):
-        return f"Point(x={self.x}, y={self.y})"
-
-    def __eq__(self, other):
-        if not isinstance(other, Point):
-            return NotImplemented
-        return (self.x, self.y) == (other.x, other.y)
-```
-
-Rules to remember:
-
-- `__repr__` is for developers (REPL, logs); `__str__` is for end users and falls back to `__repr__`.
-- Return `NotImplemented` (not `NotImplementedError`) from `__eq__` for unknown types so Python can try the reflected comparison.
-- Defining `__eq__` sets `__hash__` to `None`, making instances unhashable, unless you also define `__hash__` or use a dataclass with `frozen=True`. Objects that are equal must have equal hashes.
-- `==` for user classes is identity-based until you define `__eq__`; `is` is always identity.
-
-### Practical instance tools
-
-- `@property` exposes a computed or validated attribute without call syntax:
-
-```python
-class Temperature:
-    def __init__(self, celsius):
-        self._celsius = celsius
-
-    @property
-    def fahrenheit(self):
-        return self._celsius * 9 / 5 + 32
-
-    @fahrenheit.setter
-    def fahrenheit(self, value):
-        self._celsius = (value - 32) * 5 / 9
-```
-
-- `@classmethod` receives the class instead of the instance and is the standard pattern for alternative constructors: `Point.from_dict(data)`.
-- `@staticmethod` is a plain function namespaced under the class; use sparingly, a module-level function is usually clearer.
-- `__len__`, `__getitem__`, `__iter__`, and friends let your objects behave like built-ins; use them when the analogy is strong, not to be clever.
-- Python has no `private`. A leading underscore (`self._cache`) means "internal, do not touch". Double leading underscores trigger name mangling (`self.__token` becomes `self._ClassName__token`) and are rarely worth it.
-
-TypeScript comparison: no declarations, no access modifiers, no constructor parameter properties. Duck typing replaces interfaces at runtime: if it has the attributes and methods, it works.
-
----
-
-## 2.3 Inheritance and composition
-
-Inheritance expresses "is a" and shares behavior; composition expresses "has a" and is usually the safer default.
-
-```python
-class Animal:
-    def __init__(self, name):
-        self.name = name
-
-    def speak(self):
-        raise NotImplementedError
-
-class Dog(Animal):
-    def speak(self):
-        return f"{self.name} says woof"
-
-d = Dog("Rex")
-print(d.speak(), isinstance(d, Animal), isinstance(d, Dog))
-```
-
-Rules:
-
-- `class Child(Parent):` inherits all attributes and methods. Call `super().__init__(...)` first when the parent sets up state.
-- Overriding replaces the method for instances of the subclass. `super().method(...)` calls the next implementation in the MRO (method resolution order).
-- `isinstance(obj, Parent)` is `True` for subclasses; `type(obj) is Parent` is not. Prefer `isinstance`.
-- Multiple inheritance works with a linearized MRO (C3), e.g. `class D(B, C)` searches `D → B → C → A`. It is powerful and easy to misuse; keep it shallow.
-- Abstract base classes exist (`abc.ABC`, `@abstractmethod`), but for small codebases, raising `NotImplementedError` in the base method is enough. Chapter 5's Pydantic and Chapter 3's protocols show heavier machinery when it earns its keep.
-- Deep inheritance trees are hard to change. A base class with many optional hooks is a design smell.
-
-Composition instead of inheritance:
-
-```python
-class HttpClient:
-    def get(self, url):
-        return {"url": url, "status": 200}
-
-class UserService:
-    def __init__(self, client):
-        self._client = client        # HAS an HttpClient
-
-    def fetch_user(self, user_id):
-        return self._client.get(f"/users/{user_id}")
-
-service = UserService(HttpClient())
-```
-
-`UserService` is not a kind of `HttpClient`; it *uses* one. This keeps `UserService` testable (pass a fake client) and avoids exposing `HttpClient`'s entire API on `UserService`.
-
-When to inherit: the subclass truly passes an "is a" test, the parent is stable, and the subclass uses most of the inherited behavior. Otherwise compose.
-
----
-
-## 2.4 Dataclasses
-
-A dataclass generates `__init__`, `__repr__`, and `__eq__` from annotated fields. It removes exactly the boilerplate that classes should not make you write.
-
-```python
-from dataclasses import dataclass, field
-
-@dataclass
-class User:
-    id: int
-    name: str
-    tags: list[str] = field(default_factory=list)
-    active: bool = True
-
-u = User(id=7, name="Ada")
-print(u)                    # User(id=7, name='Ada', tags=[], active=True)
-print(u == User(7, "Ada"))  # True -- generated __eq__
-```
-
-Details:
-
-- Fields without defaults must come first. A default value must not be mutable; `field(default_factory=list)` runs a fresh factory per instance.
-- `@dataclass(frozen=True)` forbids attribute assignment after creation and makes instances hashable (usable in sets and as dict keys).
-- `@dataclass(order=True)` generates comparison methods based on field order, enabling `sorted(users)`.
-- `@dataclass(slots=True)` (3.10+) drops the per-instance `__dict__`, saving memory for large collections of records.
-- Helpers: `dataclasses.asdict(u)` produces nested dicts (useful before JSON serialization); `dataclasses.replace(u, name="Grace")` creates a modified copy.
-- `__post_init__` runs after the generated `__init__` for derived or validated fields.
-
-### Choosing a data structure
-
-| Need | Use |
-| --- | --- |
-| Fixed, known schema; equality; clear attribute access | `@dataclass` |
-| Plain dict visible to a developer, but statically typed | `TypedDict` (section 2.5) |
-| Dynamic keys, JSON at the edges, quick scripts | `dict` |
-| Untrusted input validation, coercion, serialization | Pydantic (Chapter 5) |
-| Small internal helper returning two values | `tuple` |
-
-Guidance: use dicts at the boundaries of your program (parsed JSON, request payloads) and dataclasses in the core (config, domain objects, typed results). Do not build a class hierarchy for something a function and a dict already express.
-
----
-
-## 2.5 Practical type hints
-
-Type hints document intent and let tools (pyright, mypy) and editors catch mistakes. Python itself ignores them at runtime.
-
-```python
-def fetch_user(user_id: int, include_deleted: bool = False) -> dict[str, object]:
-    return {"id": user_id}
-```
-
-Modern container and union syntax (3.9+/3.10+):
-
-```python
-ids: list[int] = [1, 2]
-counts: dict[str, int] = {"a": 1}
-point: tuple[float, float] = (1.0, 2.0)
-tags: set[str] = {"api"}
-
-def find(user_id: int) -> str | None:   # Optional[str] before 3.10
-    ...
-```
-
-Callable and abstract collections:
-
-```python
-from collections.abc import Callable, Iterable, Iterator, Sequence, Mapping
-
-def apply(fn: Callable[[int], str], values: Iterable[int]) -> list[str]:
-    return [fn(v) for v in values]
-```
-
-Prefer abstract types in parameters (`Iterable[int]` accepts lists, tuples, generators) and concrete types for returns (`list[str]` promises an indexable, reusable object).
-
-### `TypedDict` for JSON-shaped data
-
-```python
-from typing import TypedDict, NotRequired
-
-class ChatMessage(TypedDict):
-    role: str
-    content: str
-    name: NotRequired[str]
-
-def render(message: ChatMessage) -> str:
-    return f"{message['role']}: {message['content']}"
-```
-
-At runtime a `TypedDict` is a plain `dict`. `Total=False` applies optionality to all keys; `NotRequired[T]` (3.11+) marks individual keys. Use it when you want static checking but need a real dict, for example when you are going to hand the object to `json.dumps` or a provider SDK.
-
-### Generics at a practical level
-
-```python
-from typing import TypeVar
-
-T = TypeVar("T")
-
-def first(items: list[T]) -> T:
-    return items[0]
-
-first([1, 2])         # int
-first(["a"])          # str
-```
-
-`TypeVar` keeps the input and output types linked. Python 3.12 allows the shorter `def first[T](items: list[T]) -> T:`. Also useful:
-
-- `Literal["low", "high"]` for a small fixed set of values.
-- Type aliases: `UserId = int`, `Headers = Mapping[str, str]`.
-- `Any` disables checking for that value; treat any `Any` as a TODO.
-- Forward references are strings when needed: `def clone(self) -> "Point":`. `from __future__ import annotations` postpones evaluation everywhere.
-
-Hints are not validation. `fetch_user("abc")` runs; the mistake surfaces later. Runtime validation belongs to Pydantic at the API boundary (Chapter 5), while type hints keep the internals honest (tooling setup is in Chapter 4).
-
----
-
-## 2.6 Iterables, iterators, and generators
-
-### The iteration protocol
-
-An **iterable** can be passed to `iter()`: it has `__iter__`. An **iterator** is a single-use cursor: it has `__next__` and returns itself from `__iter__`. `for` calls `iter()` once, then `next()` until `StopIteration`.
-
-```python
-xs = [1, 2, 3]
-it = iter(xs)
-print(next(it))          # 1
-print(next(it))          # 2
-print(list(it))          # [3]   -- list() consumes the rest
-print(list(it))          # []    -- an iterator is exhausted once
-print(next(it, "end"))   # end   -- default instead of StopIteration
-```
-
-Most containers are iterable but not iterators (`iter(xs) is not xs`). Generators are both.
-
-### Generators
-
-A function containing `yield` returns a generator object. Calling it runs no code until you iterate; each `next()` runs to the next `yield` and pauses, preserving local state.
-
-```python
-def evens(limit):
-    n = 0
-    while n < limit:
-        yield n
-        n += 2
-
-for value in evens(6):
-    print(value)          # 0 2 4
-```
-
-- `yield from other` delegates iteration to another iterable, flattening it into the current stream (`yield from [1, 2]`).
-- A generator can be infinite; consumers must stop early (`for` with `break`, `next` N times, or `itertools.islice(gen, 10)`).
-- Generator expressions are anonymous generators: `sum(x * x for x in xs)`, `any(is_bad(r) for r in rows)`.
-
-### Lazy processing
-
-`map`, `filter`, `zip`, `enumerate`, and `reversed`-free functions return lazy iterators. A pipeline of generators computes one item at a time and holds no intermediate lists:
-
-```python
-def read_lines(lines):
-    for line in lines:
-        yield line.strip()
-
-def non_empty(lines):
-    for line in lines:
-        if line:
-            yield line
-
-text = ["  a ", "", " b", "   "]
-for line in non_empty(read_lines(text)):
-    print(line)
-```
-
-This pattern scales to files, database cursors, and API pages, where materializing everything would blow memory (Chapters 3, 7, 8).
-
-Guidance:
-
-- Return a generator when the caller likely wants to process items one at a time; return a list when the caller needs `len`, indexing, sorting, or multiple passes.
-- An iterator cannot be reused. If a caller iterates twice, convert once with `list(...)` or return a fresh generator from a function.
-- `bool()`, `in`, `sum`, `list`, `tuple`, `set`, `dict`, and unpacking all consume the same iterator exactly once.
-- `itertools` (`islice`, `chain`, `groupby`) composes lazy pipelines; `groupby` requires sorted input.
-- Debugging: wrap with `list(...)` temporarily to inspect, then remove it when done.
-
-Beware the "returns an iterator" API that looks like a list:
-
-```python
-data = map(int, ["1", "2"])
-print(len(data))        # TypeError: no len on map
-```
-
----
-
-## 2.7 Exceptions
-
-Exceptions are Python's error mechanism; they are not exclusively for catastrophic failures. One function per failure mode is idiomatic, and every caller decides to handle or propagate.
-
-```python
-try:
-    value = int(raw)
-except ValueError as e:
-    print(f"bad input: {e}")
-    value = 0
-else:
-    print("converted")
-finally:
-    print("done")
-```
-
-Semantics:
-
-- `try` runs the block; on error, the first matching `except` runs and the rest of `try` is skipped.
-- `else` runs only when no exception occurred — useful to keep the protected region minimal.
-- `finally` always runs (success, exception, or `return`) and is for cleanup.
-- Catch specific exception types. A bare `except:` also catches `KeyboardInterrupt` and hides bugs. `except Exception:` is acceptable at process boundaries only, and the exception must be logged or re-raised.
-- `except Exception as e` binds the exception; the name is deleted when the block ends.
-
-Common built-in types: `ValueError`, `TypeError`, `KeyError`, `IndexError`, `AttributeError`, `ZeroDivisionError`, `FileNotFoundError` (an `OSError`), `RuntimeError`, `NotImplementedError`. Hierarchy matters: `KeyError` and `IndexError` are both `LookupError`; `OSError` covers most I/O failures.
-
-### Raising and chaining
-
-```python
-def parse_port(text):
-    try:
-        return int(text)
-    except ValueError as e:
-        raise ValueError(f"invalid port: {text!r}") from e
-```
-
-- `raise SomeError("message")` raises with context.
-- Bare `raise` inside an `except` block re-raises the current exception unchanged.
-- `raise NewError(...) from e` records `e` as the `__cause__`, producing a clear traceback ("The above exception was the direct cause...").
-- `raise NewError(...)` inside `except` automatically chains as `__context__`; `raise ... from None` suppresses that display.
-
-### Custom exceptions
-
-```python
-class ApiError(Exception):
-    """Base for all errors raised by this client."""
-
-class TransientApiError(ApiError):
-    """Retryable: timeouts, 429s, 5xx."""
-
-class PermanentApiError(ApiError):
-    """Not retryable: 400s, validation failures."""
-```
-
-Keep custom exceptions small, module-level, and grouped under one base per subsystem. They carry a type and often a message; only add attributes (like `status_code`) when callers actually branch on them. In particular, transient versus permanent classification is the foundation of retry logic (Chapter 8).
-
-### EAFP and validation
-
-Python style favors EAFP ("easier to ask forgiveness than permission"): attempt the operation and handle the specific exception, rather than checking conditions first.
-
-```python
-try:
-    port = int(settings["port"])
-except (KeyError, ValueError):
-    port = 8080
-```
-
-Rule of thumb: use exceptions for genuinely exceptional or unavoidable failure; use explicit checks (`if`, `is None`, `in`) for cheap validation that is part of normal control flow. Do not use exceptions for expected branching that a dict lookup could answer directly.
-
-`assert` is for internal invariants, never input validation. It disappears under `python -O`.
-
----
-
-## 2.8 Context managers and resource management
-
-`with` guarantees cleanup. The object manages a resource: it implements `__enter__` (returns the value bound after `as`) and `__exit__` (runs on exit, even on exception).
-
-```python
-with open("data.txt") as f:
-    content = f.read()
-# f is closed here, even if read() raised
-```
-
-Class-based context manager:
-
-```python
-class Timer:
-    def __enter__(self):
-        print("start")
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        print("stop")
-        return False          # False: do not suppress exceptions
-
-with Timer():
-    pass
-```
-
-Generator-based context manager with `contextlib.contextmanager`:
-
-```python
-from contextlib import contextmanager
-
-@contextmanager
-def tagged(name):
-    print(f"<{name}>")
-    try:
-        yield name            # everything before yield is __enter__
-    finally:
-        print(f"</{name}>")   # everything after is __exit__
-
-with tagged("b") as t:
-    print(t)
-```
-
-Points:
-
-- `__exit__` returning a truthy value suppresses the exception. Return `False` (or nothing) by default; suppressing errors silently is a bug factory.
-- Multiple managers: `with open(a) as f, open(b) as g:`. They enter left to right and exit right to left.
-- `contextlib.suppress(SomeError)` is the explicit way to ignore one specific error.
-- `try/finally` is equivalent in power; `with` is preferred because it is shorter and the cleanup cannot be accidentally skipped.
-- Context managers are the backbone of connection pooling, sessions, temporary state, and timing in backend code (Chapters 3, 5, 6).
-
-Avoid holding resources beyond the `with` block, and never return a file object from inside the block expecting it to stay open.
-
----
-
-## 2.9 Conventions and readable code
-
-PEP 8 in the parts that matter daily:
-
-- `snake_case` for functions, methods, modules; `CapWords` for classes; `UPPER_SNAKE` for module constants; `_leading_underscore` for internals.
-- 4-space indentation, imports at the top in three groups, two blank lines between top-level definitions.
-- Keep lines readable (roughly 79–99 characters). Use parentheses, not backslashes, to wrap.
-- No semicolons; one statement per line.
-
-Design conventions that keep Python services maintainable:
-
-- Write small functions that return values; let callers decide about printing and logging. A function that both computes and prints is hard to test.
-- Prefer keyword-only arguments for boolean flags: `def fetch(url, *, retries=3)`. Call sites read `fetch(url, retries=1)`.
-- Accept the most general type you can (`Iterable[str]`), return the most useful (`list[str]`).
-- Use dataclasses for fixed schemas; use dicts at JSON boundaries; do not invent a class hierarchy for two related shapes.
-- Name exceptions after failures (`RateLimitError`), not after reactions (`RetryException`).
-- Docstrings: one line describing the contract for anything non-obvious, including argument units and failure modes. Do not restate the code.
-- Avoid mutable module-level state; pass dependencies explicitly. It makes tests deterministic.
-- Fail loudly and early at boundaries; convert exceptions into your subsystem's taxonomy as close to the source as possible.
-- `if __name__ == "__main__": main()` for scripts.
-- When in doubt, prefer the boring, obvious implementation over the clever one. Python rewards clarity.
-
-Common mistakes checklist for this chapter:
-
-1. Forgetting `self` in a method signature.
-2. Mutable class attributes shared across instances.
-3. Defining `__eq__` without `__hash__` and then putting instances in a set.
-4. Using a mutable default in a dataclass (`items: list = []`), which raises at class definition.
-5. Reusing an exhausted generator or iterator.
-6. Building giant lists where a generator pipeline is natural.
-7. Bare `except:` or `except Exception: pass` swallowing failures.
-8. Doing work at import time so importing the module has side effects.
-9. Running a module with `python path/to/mod.py` and hitting relative-import errors instead of using `-m`.
-10. Hints promising types that the runtime never checks; validation must happen at the boundary.
-11. Using inheritance to reuse one method; composition is usually the answer.
-12. Returning a resource from inside a `with` block and using it after it closes.
-
----
-
 # Exercises
 
 Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
@@ -717,6 +211,103 @@ def run(mode):
 export default function double(x: number): number { return x * 2; }
 export const PI = 3.14159;
 ```
+
+## 2.2 Classes and instances
+
+A class bundles data and behavior. `__init__` initializes a new instance; `self` is the instance and is always the first parameter of instance methods. Unlike TypeScript, there is no implicit `this` — it is passed explicitly and can be named anything, though `self` is a hard convention.
+
+```python
+class Point:
+    kind = "point"                  # class attribute: shared by all instances
+
+    def __init__(self, x, y):
+        self.x = x                  # instance attributes: per-instance
+        self.y = y
+
+    def distance_to(self, other):
+        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
+
+p = Point(3, 4)
+print(p.x, p.kind)
+print(p.distance_to(Point(0, 0)))
+```
+
+Key semantics:
+
+- Attributes are created by assignment. There are no field declarations and no required `__init__`; `Point.__init__` is how instances normally get their attributes.
+- Attribute lookup checks the instance first, then the class. Assigning `p.kind = "dot"` creates an *instance* attribute shadowing the class attribute; the class itself is unchanged.
+- Mutable class attributes are shared by every instance — the same aliasing trap as Chapter 1:
+
+```python
+class Bad:
+    items = []                      # shared across all instances
+
+a, b = Bad(), Bad()
+a.items.append(1)
+print(b.items)                      # [1] -- probably not what was intended
+```
+
+- Methods are just functions; `p.distance_to(q)` is sugar for `Point.distance_to(p, q)`.
+- `self` is not a keyword. Forgetting it in a definition produces a `TypeError` at the call site, not at definition time.
+
+### `__repr__`, `__str__`, and `__eq__`
+
+Default representations are useless for debugging (`<Point object at 0x...>`), and default equality is identity:
+
+```python
+print(Point(1, 2) == Point(1, 2))   # False -- different objects, no __eq__
+```
+
+Implement the dunders you actually need:
+
+```python
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __repr__(self):
+        return f"Point(x={self.x}, y={self.y})"
+
+    def __eq__(self, other):
+        if not isinstance(other, Point):
+            return NotImplemented
+        return (self.x, self.y) == (other.x, other.y)
+```
+
+Rules to remember:
+
+- `__repr__` is for developers (REPL, logs); `__str__` is for end users and falls back to `__repr__`.
+- Return `NotImplemented` (not `NotImplementedError`) from `__eq__` for unknown types so Python can try the reflected comparison.
+- Defining `__eq__` sets `__hash__` to `None`, making instances unhashable, unless you also define `__hash__` or use a dataclass with `frozen=True`. Objects that are equal must have equal hashes.
+- `==` for user classes is identity-based until you define `__eq__`; `is` is always identity.
+
+### Practical instance tools
+
+- `@property` exposes a computed or validated attribute without call syntax:
+
+```python
+class Temperature:
+    def __init__(self, celsius):
+        self._celsius = celsius
+
+    @property
+    def fahrenheit(self):
+        return self._celsius * 9 / 5 + 32
+
+    @fahrenheit.setter
+    def fahrenheit(self, value):
+        self._celsius = (value - 32) * 5 / 9
+```
+
+- `@classmethod` receives the class instead of the instance and is the standard pattern for alternative constructors: `Point.from_dict(data)`.
+- `@staticmethod` is a plain function namespaced under the class; use sparingly, a module-level function is usually clearer.
+- `__len__`, `__getitem__`, `__iter__`, and friends let your objects behave like built-ins; use them when the analogy is strong, not to be clever.
+- Python has no `private`. A leading underscore (`self._cache`) means "internal, do not touch". Double leading underscores trigger name mangling (`self.__token` becomes `self._ClassName__token`) and are rarely worth it.
+
+TypeScript comparison: no declarations, no access modifiers, no constructor parameter properties. Duck typing replaces interfaces at runtime: if it has the attributes and methods, it works.
+
+---
 
 ## Group B — Classes and instances
 
@@ -880,6 +471,58 @@ class Client:
     def get(self, key):
         return self.cache.get(key)
 ```
+
+## 2.3 Inheritance and composition
+
+Inheritance expresses "is a" and shares behavior; composition expresses "has a" and is usually the safer default.
+
+```python
+class Animal:
+    def __init__(self, name):
+        self.name = name
+
+    def speak(self):
+        raise NotImplementedError
+
+class Dog(Animal):
+    def speak(self):
+        return f"{self.name} says woof"
+
+d = Dog("Rex")
+print(d.speak(), isinstance(d, Animal), isinstance(d, Dog))
+```
+
+Rules:
+
+- `class Child(Parent):` inherits all attributes and methods. Call `super().__init__(...)` first when the parent sets up state.
+- Overriding replaces the method for instances of the subclass. `super().method(...)` calls the next implementation in the MRO (method resolution order).
+- `isinstance(obj, Parent)` is `True` for subclasses; `type(obj) is Parent` is not. Prefer `isinstance`.
+- Multiple inheritance works with a linearized MRO (C3), e.g. `class D(B, C)` searches `D → B → C → A`. It is powerful and easy to misuse; keep it shallow.
+- Abstract base classes exist (`abc.ABC`, `@abstractmethod`), but for small codebases, raising `NotImplementedError` in the base method is enough. Chapter 5's Pydantic and Chapter 3's protocols show heavier machinery when it earns its keep.
+- Deep inheritance trees are hard to change. A base class with many optional hooks is a design smell.
+
+Composition instead of inheritance:
+
+```python
+class HttpClient:
+    def get(self, url):
+        return {"url": url, "status": 200}
+
+class UserService:
+    def __init__(self, client):
+        self._client = client        # HAS an HttpClient
+
+    def fetch_user(self, user_id):
+        return self._client.get(f"/users/{user_id}")
+
+service = UserService(HttpClient())
+```
+
+`UserService` is not a kind of `HttpClient`; it *uses* one. This keeps `UserService` testable (pass a fake client) and avoids exposing `HttpClient`'s entire API on `UserService`.
+
+When to inherit: the subclass truly passes an "is a" test, the parent is stable, and the subclass uses most of the inherited behavior. Otherwise compose.
+
+---
 
 ## Group C — Inheritance and composition
 
@@ -1060,6 +703,48 @@ function fail(status: number): never {
 
 **C17.** Predict what `isinstance(Dog("Rex"), object)` returns and explain why every class is compatible with `object`.
 
+## 2.4 Dataclasses
+
+A dataclass generates `__init__`, `__repr__`, and `__eq__` from annotated fields. It removes exactly the boilerplate that classes should not make you write.
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class User:
+    id: int
+    name: str
+    tags: list[str] = field(default_factory=list)
+    active: bool = True
+
+u = User(id=7, name="Ada")
+print(u)                    # User(id=7, name='Ada', tags=[], active=True)
+print(u == User(7, "Ada"))  # True -- generated __eq__
+```
+
+Details:
+
+- Fields without defaults must come first. A default value must not be mutable; `field(default_factory=list)` runs a fresh factory per instance.
+- `@dataclass(frozen=True)` forbids attribute assignment after creation and makes instances hashable (usable in sets and as dict keys).
+- `@dataclass(order=True)` generates comparison methods based on field order, enabling `sorted(users)`.
+- `@dataclass(slots=True)` (3.10+) drops the per-instance `__dict__`, saving memory for large collections of records.
+- Helpers: `dataclasses.asdict(u)` produces nested dicts (useful before JSON serialization); `dataclasses.replace(u, name="Grace")` creates a modified copy.
+- `__post_init__` runs after the generated `__init__` for derived or validated fields.
+
+### Choosing a data structure
+
+| Need | Use |
+| --- | --- |
+| Fixed, known schema; equality; clear attribute access | `@dataclass` |
+| Plain dict visible to a developer, but statically typed | `TypedDict` (section 2.5) |
+| Dynamic keys, JSON at the edges, quick scripts | `dict` |
+| Untrusted input validation, coercion, serialization | Pydantic (Chapter 5) |
+| Small internal helper returning two values | `tuple` |
+
+Guidance: use dicts at the boundaries of your program (parsed JSON, request payloads) and dataclasses in the core (config, domain objects, typed results). Do not build a class hierarchy for something a function and a dict already express.
+
+---
+
 ## Group D — Dataclasses
 
 **D1.** Rewrite this class as a dataclass with identical behavior, including defaults:
@@ -1233,6 +918,79 @@ print(D(1) == D(1), R(1) == R(1), D(1) == R(1))
 
 **D17.** Add `slots=True` to the dataclass in D15 and predict whether `vars(D(1))` still works. Explain the memory trade-off in one sentence.
 
+## 2.5 Practical type hints
+
+Type hints document intent and let tools (pyright, mypy) and editors catch mistakes. Python itself ignores them at runtime.
+
+```python
+def fetch_user(user_id: int, include_deleted: bool = False) -> dict[str, object]:
+    return {"id": user_id}
+```
+
+Modern container and union syntax (3.9+/3.10+):
+
+```python
+ids: list[int] = [1, 2]
+counts: dict[str, int] = {"a": 1}
+point: tuple[float, float] = (1.0, 2.0)
+tags: set[str] = {"api"}
+
+def find(user_id: int) -> str | None:   # Optional[str] before 3.10
+    ...
+```
+
+Callable and abstract collections:
+
+```python
+from collections.abc import Callable, Iterable, Iterator, Sequence, Mapping
+
+def apply(fn: Callable[[int], str], values: Iterable[int]) -> list[str]:
+    return [fn(v) for v in values]
+```
+
+Prefer abstract types in parameters (`Iterable[int]` accepts lists, tuples, generators) and concrete types for returns (`list[str]` promises an indexable, reusable object).
+
+### `TypedDict` for JSON-shaped data
+
+```python
+from typing import TypedDict, NotRequired
+
+class ChatMessage(TypedDict):
+    role: str
+    content: str
+    name: NotRequired[str]
+
+def render(message: ChatMessage) -> str:
+    return f"{message['role']}: {message['content']}"
+```
+
+At runtime a `TypedDict` is a plain `dict`. `Total=False` applies optionality to all keys; `NotRequired[T]` (3.11+) marks individual keys. Use it when you want static checking but need a real dict, for example when you are going to hand the object to `json.dumps` or a provider SDK.
+
+### Generics at a practical level
+
+```python
+from typing import TypeVar
+
+T = TypeVar("T")
+
+def first(items: list[T]) -> T:
+    return items[0]
+
+first([1, 2])         # int
+first(["a"])          # str
+```
+
+`TypeVar` keeps the input and output types linked. Python 3.12 allows the shorter `def first[T](items: list[T]) -> T:`. Also useful:
+
+- `Literal["low", "high"]` for a small fixed set of values.
+- Type aliases: `UserId = int`, `Headers = Mapping[str, str]`.
+- `Any` disables checking for that value; treat any `Any` as a TODO.
+- Forward references are strings when needed: `def clone(self) -> "Point":`. `from __future__ import annotations` postpones evaluation everywhere.
+
+Hints are not validation. `fetch_user("abc")` runs; the mistake surfaces later. Runtime validation belongs to Pydantic at the API boundary (Chapter 5), while type hints keep the internals honest (tooling setup is in Chapter 4).
+
+---
+
 ## Group E — Practical type hints
 
 **E1.** Add complete type hints to this signature: `def fetch(url, retries=3, headers=None)` where `headers` maps strings to strings and may be `None`, and the return value is a `dict` with string keys and values of any type.
@@ -1309,6 +1067,81 @@ class Job:
     name: str
     tags: list = field(default_factory=list)
 ```
+
+## 2.6 Iterables, iterators, and generators
+
+### The iteration protocol
+
+An **iterable** can be passed to `iter()`: it has `__iter__`. An **iterator** is a single-use cursor: it has `__next__` and returns itself from `__iter__`. `for` calls `iter()` once, then `next()` until `StopIteration`.
+
+```python
+xs = [1, 2, 3]
+it = iter(xs)
+print(next(it))          # 1
+print(next(it))          # 2
+print(list(it))          # [3]   -- list() consumes the rest
+print(list(it))          # []    -- an iterator is exhausted once
+print(next(it, "end"))   # end   -- default instead of StopIteration
+```
+
+Most containers are iterable but not iterators (`iter(xs) is not xs`). Generators are both.
+
+### Generators
+
+A function containing `yield` returns a generator object. Calling it runs no code until you iterate; each `next()` runs to the next `yield` and pauses, preserving local state.
+
+```python
+def evens(limit):
+    n = 0
+    while n < limit:
+        yield n
+        n += 2
+
+for value in evens(6):
+    print(value)          # 0 2 4
+```
+
+- `yield from other` delegates iteration to another iterable, flattening it into the current stream (`yield from [1, 2]`).
+- A generator can be infinite; consumers must stop early (`for` with `break`, `next` N times, or `itertools.islice(gen, 10)`).
+- Generator expressions are anonymous generators: `sum(x * x for x in xs)`, `any(is_bad(r) for r in rows)`.
+
+### Lazy processing
+
+`map`, `filter`, `zip`, `enumerate`, and `reversed`-free functions return lazy iterators. A pipeline of generators computes one item at a time and holds no intermediate lists:
+
+```python
+def read_lines(lines):
+    for line in lines:
+        yield line.strip()
+
+def non_empty(lines):
+    for line in lines:
+        if line:
+            yield line
+
+text = ["  a ", "", " b", "   "]
+for line in non_empty(read_lines(text)):
+    print(line)
+```
+
+This pattern scales to files, database cursors, and API pages, where materializing everything would blow memory (Chapters 3, 7, 8).
+
+Guidance:
+
+- Return a generator when the caller likely wants to process items one at a time; return a list when the caller needs `len`, indexing, sorting, or multiple passes.
+- An iterator cannot be reused. If a caller iterates twice, convert once with `list(...)` or return a fresh generator from a function.
+- `bool()`, `in`, `sum`, `list`, `tuple`, `set`, `dict`, and unpacking all consume the same iterator exactly once.
+- `itertools` (`islice`, `chain`, `groupby`) composes lazy pipelines; `groupby` requires sorted input.
+- Debugging: wrap with `list(...)` temporarily to inspect, then remove it when done.
+
+Beware the "returns an iterator" API that looks like a list:
+
+```python
+data = map(int, ["1", "2"])
+print(len(data))        # TypeError: no len on map
+```
+
+---
 
 ## Group F — Iterables and iterators
 
@@ -1559,6 +1392,79 @@ g = (x for x in range(10**9))
 print(head(g))
 ```
 
+## 2.7 Exceptions
+
+Exceptions are Python's error mechanism; they are not exclusively for catastrophic failures. One function per failure mode is idiomatic, and every caller decides to handle or propagate.
+
+```python
+try:
+    value = int(raw)
+except ValueError as e:
+    print(f"bad input: {e}")
+    value = 0
+else:
+    print("converted")
+finally:
+    print("done")
+```
+
+Semantics:
+
+- `try` runs the block; on error, the first matching `except` runs and the rest of `try` is skipped.
+- `else` runs only when no exception occurred — useful to keep the protected region minimal.
+- `finally` always runs (success, exception, or `return`) and is for cleanup.
+- Catch specific exception types. A bare `except:` also catches `KeyboardInterrupt` and hides bugs. `except Exception:` is acceptable at process boundaries only, and the exception must be logged or re-raised.
+- `except Exception as e` binds the exception; the name is deleted when the block ends.
+
+Common built-in types: `ValueError`, `TypeError`, `KeyError`, `IndexError`, `AttributeError`, `ZeroDivisionError`, `FileNotFoundError` (an `OSError`), `RuntimeError`, `NotImplementedError`. Hierarchy matters: `KeyError` and `IndexError` are both `LookupError`; `OSError` covers most I/O failures.
+
+### Raising and chaining
+
+```python
+def parse_port(text):
+    try:
+        return int(text)
+    except ValueError as e:
+        raise ValueError(f"invalid port: {text!r}") from e
+```
+
+- `raise SomeError("message")` raises with context.
+- Bare `raise` inside an `except` block re-raises the current exception unchanged.
+- `raise NewError(...) from e` records `e` as the `__cause__`, producing a clear traceback ("The above exception was the direct cause...").
+- `raise NewError(...)` inside `except` automatically chains as `__context__`; `raise ... from None` suppresses that display.
+
+### Custom exceptions
+
+```python
+class ApiError(Exception):
+    """Base for all errors raised by this client."""
+
+class TransientApiError(ApiError):
+    """Retryable: timeouts, 429s, 5xx."""
+
+class PermanentApiError(ApiError):
+    """Not retryable: 400s, validation failures."""
+```
+
+Keep custom exceptions small, module-level, and grouped under one base per subsystem. They carry a type and often a message; only add attributes (like `status_code`) when callers actually branch on them. In particular, transient versus permanent classification is the foundation of retry logic (Chapter 8).
+
+### EAFP and validation
+
+Python style favors EAFP ("easier to ask forgiveness than permission"): attempt the operation and handle the specific exception, rather than checking conditions first.
+
+```python
+try:
+    port = int(settings["port"])
+except (KeyError, ValueError):
+    port = 8080
+```
+
+Rule of thumb: use exceptions for genuinely exceptional or unavoidable failure; use explicit checks (`if`, `is None`, `in`) for cheap validation that is part of normal control flow. Do not use exceptions for expected branching that a dict lookup could answer directly.
+
+`assert` is for internal invariants, never input validation. It disappears under `python -O`.
+
+---
+
 ## Group H — Exceptions
 
 **H1.** Predict the exact output:
@@ -1722,6 +1628,61 @@ except ValueError:
 
 **H20.** A function must never leak internal library exceptions. Write its contract: catch the library-specific error, `raise` your `ServiceError` `from` it, and show a caller catching only `ServiceError` while the original cause is preserved.
 
+## 2.8 Context managers and resource management
+
+`with` guarantees cleanup. The object manages a resource: it implements `__enter__` (returns the value bound after `as`) and `__exit__` (runs on exit, even on exception).
+
+```python
+with open("data.txt") as f:
+    content = f.read()
+# f is closed here, even if read() raised
+```
+
+Class-based context manager:
+
+```python
+class Timer:
+    def __enter__(self):
+        print("start")
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        print("stop")
+        return False          # False: do not suppress exceptions
+
+with Timer():
+    pass
+```
+
+Generator-based context manager with `contextlib.contextmanager`:
+
+```python
+from contextlib import contextmanager
+
+@contextmanager
+def tagged(name):
+    print(f"<{name}>")
+    try:
+        yield name            # everything before yield is __enter__
+    finally:
+        print(f"</{name}>")   # everything after is __exit__
+
+with tagged("b") as t:
+    print(t)
+```
+
+Points:
+
+- `__exit__` returning a truthy value suppresses the exception. Return `False` (or nothing) by default; suppressing errors silently is a bug factory.
+- Multiple managers: `with open(a) as f, open(b) as g:`. They enter left to right and exit right to left.
+- `contextlib.suppress(SomeError)` is the explicit way to ignore one specific error.
+- `try/finally` is equivalent in power; `with` is preferred because it is shorter and the cleanup cannot be accidentally skipped.
+- Context managers are the backbone of connection pooling, sessions, temporary state, and timing in backend code (Chapters 3, 5, 6).
+
+Avoid holding resources beyond the `with` block, and never return a file object from inside the block expecting it to stay open.
+
+---
+
 ## Group I — Context managers and resource management
 
 **I1.** Predict the exact output order:
@@ -1869,6 +1830,45 @@ def query(sql):
     conn.close()
     return result
 ```
+
+## 2.9 Conventions and readable code
+
+PEP 8 in the parts that matter daily:
+
+- `snake_case` for functions, methods, modules; `CapWords` for classes; `UPPER_SNAKE` for module constants; `_leading_underscore` for internals.
+- 4-space indentation, imports at the top in three groups, two blank lines between top-level definitions.
+- Keep lines readable (roughly 79–99 characters). Use parentheses, not backslashes, to wrap.
+- No semicolons; one statement per line.
+
+Design conventions that keep Python services maintainable:
+
+- Write small functions that return values; let callers decide about printing and logging. A function that both computes and prints is hard to test.
+- Prefer keyword-only arguments for boolean flags: `def fetch(url, *, retries=3)`. Call sites read `fetch(url, retries=1)`.
+- Accept the most general type you can (`Iterable[str]`), return the most useful (`list[str]`).
+- Use dataclasses for fixed schemas; use dicts at JSON boundaries; do not invent a class hierarchy for two related shapes.
+- Name exceptions after failures (`RateLimitError`), not after reactions (`RetryException`).
+- Docstrings: one line describing the contract for anything non-obvious, including argument units and failure modes. Do not restate the code.
+- Avoid mutable module-level state; pass dependencies explicitly. It makes tests deterministic.
+- Fail loudly and early at boundaries; convert exceptions into your subsystem's taxonomy as close to the source as possible.
+- `if __name__ == "__main__": main()` for scripts.
+- When in doubt, prefer the boring, obvious implementation over the clever one. Python rewards clarity.
+
+Common mistakes checklist for this chapter:
+
+1. Forgetting `self` in a method signature.
+2. Mutable class attributes shared across instances.
+3. Defining `__eq__` without `__hash__` and then putting instances in a set.
+4. Using a mutable default in a dataclass (`items: list = []`), which raises at class definition.
+5. Reusing an exhausted generator or iterator.
+6. Building giant lists where a generator pipeline is natural.
+7. Bare `except:` or `except Exception: pass` swallowing failures.
+8. Doing work at import time so importing the module has side effects.
+9. Running a module with `python path/to/mod.py` and hitting relative-import errors instead of using `-m`.
+10. Hints promising types that the runtime never checks; validation must happen at the boundary.
+11. Using inheritance to reuse one method; composition is usually the answer.
+12. Returning a resource from inside a `with` block and using it after it closes.
+
+---
 
 ## Group J — Conventions and readable code
 
@@ -2161,4 +2161,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Write and use context managers for guaranteed cleanup.
 - Produce code a Python reviewer would not reformat: naming, imports, small functions, explicit dependencies.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 3.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 3](../chapter-3/practical-dev.md).

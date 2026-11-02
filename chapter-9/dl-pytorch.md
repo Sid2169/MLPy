@@ -132,1086 +132,6 @@ Do not create a tensor on the GPU inside a dataset's `__getitem__` when using mu
 
 ---
 
-## 9.2 Indexing, views, reshaping, and broadcasting
-
-Basic indexing follows NumPy syntax, with a crucial PyTorch difference: basic indexing returns views that share storage.
-
-```python
-x = torch.arange(6).reshape(2, 3)
-row = x[0]              # view, shape (3,)
-row[0] = 99
-print(x)                # row 0 now starts with 99
-```
-
-Slicing is also a view:
-
-```python
-block = x[:, 1:]        # view
-block.zero_()
-print(x)
-```
-
-Advanced indexing with an integer tensor or boolean mask returns a copy:
-
-```python
-x = torch.arange(6).reshape(2, 3)
-selected = x[[0, 1]]
-selected[0, 0] = -1
-print(x[0, 0])          # unchanged
-```
-
-Indexing rules worth remembering:
-
-- A Python integer removes a dimension; a slice keeps it.
-- `None` adds a dimension: `x[:, None]` has shape `(2, 1, 3)` for a `(2, 3)` input.
-- `...` fills in missing dimensions.
-- Boolean masks must broadcast to the indexed shape.
-- Integer-tensor indexing gathers entries; the result is a copy.
-- Assignment through basic indexing mutates the original; assignment through advanced indexing does not.
-
-### Reshape, view, and contiguity
-
-`reshape` changes shape when the number of elements is unchanged. It may return a view or a copy. `view` requires compatible strides and fails on non-contiguous tensors.
-
-```python
-x = torch.arange(6)
-print(x.view(2, 3).shape)       # OK: contiguous
-print(x.view(-1).shape)         # -1 infers one dimension
-
-t = torch.arange(6).reshape(2, 3).T
-print(t.shape)                  # (3, 2)
-print(t.is_contiguous())        # False
-# t.view(-1)                    # RuntimeError: incompatible strides
-print(t.reshape(-1).shape)      # (6,) works; may copy
-print(t.contiguous().view(-1))  # explicit copy then view
-```
-
-`transpose` swaps dimensions but does not move data; it changes strides. Calling `.contiguous()` forces a dense copy. Prefer `reshape` unless you specifically need a view and know the tensor is contiguous.
-
-`flatten`, `squeeze`, and `unsqueeze`:
-
-```python
-x = torch.ones(2, 3)
-print(x.flatten().shape)        # (6,)
-print(x.unsqueeze(0).shape)     # (1, 2, 3)
-print(x.unsqueeze(1).shape)     # (2, 1, 3)
-print(x.unsqueeze(0).squeeze(0).shape)  # (2, 3)
-```
-
-`torch.cat` joins along an existing dimension; `torch.stack` adds a new dimension:
-
-```python
-a = torch.zeros(2, 3)
-b = torch.ones(2, 3)
-print(torch.cat([a, b], dim=0).shape)    # (4, 3)
-print(torch.cat([a, b], dim=1).shape)    # (2, 6)
-print(torch.stack([a, b], dim=0).shape)  # (2, 2, 3)
-```
-
-### Broadcasting
-
-Broadcasting aligns dimensions from the right. A dimension of size 1 expands to match the other operand, and missing leading dimensions are treated as size 1.
-
-```python
-x = torch.ones(2, 3)
-v = torch.tensor([1.0, 2.0, 3.0])
-print((x + v).shape)             # (2, 3)
-
-col = torch.tensor([[1.0], [2.0]])   # (2, 1)
-print((x + col).shape)           # (2, 3)
-
-outer = torch.zeros(2, 1) + torch.zeros(1, 3)
-print(outer.shape)               # (2, 3)
-```
-
-Incompatible trailing dimensions raise an error:
-
-```python
-# torch.ones(2, 3) + torch.ones(4)   # RuntimeError
-```
-
-`expand` creates a view with stride 0 along expanded dimensions; `repeat` copies data:
-
-```python
-base = torch.zeros(1, 3)
-expanded = base.expand(4, 3)     # no copy
-repeated = base.repeat(4, 1)     # copy
-print(expanded.stride())         # (0, 1)
-```
-
-In-place operations on broadcast-expanded views are restricted. Avoid writing to an `expand`ed tensor; it is intended for read-only broadcasting.
-
----
-
-## 9.3 Autograd and gradient mechanics
-
-PyTorch records operations on tensors whose `requires_grad` is `True` and builds a dynamic computation graph. Calling `.backward()` on a scalar output propagates gradients to leaf tensors.
-
-```python
-x = torch.tensor(2.0, requires_grad=True)
-y = x ** 2
-y.backward()
-print(x.grad)                    # tensor(4.)
-```
-
-Only floating-point and complex tensors can require gradients:
-
-```python
-# torch.tensor([1, 2], requires_grad=True)  # RuntimeError
-```
-
-### Leaves, non-leaves, and `.grad`
-
-A tensor created by the user with `requires_grad=True` is a leaf. Results of operations are non-leaf tensors with a `grad_fn`.
-
-```python
-x = torch.tensor([1.0, 2.0], requires_grad=True)
-y = x * 3
-print(x.is_leaf, y.is_leaf)      # True False
-print(type(y.grad_fn).__name__)  # MulBackward0
-```
-
-After `y.sum().backward()`, gradients are stored in the `.grad` attribute of leaf tensors by default, not in non-leaf tensors:
-
-```python
-x = torch.tensor([1.0, 2.0], requires_grad=True)
-y = (x * 3).sum()
-y.backward()
-print(x.grad)                    # tensor([3., 3.])
-```
-
-If you need the gradient of a non-leaf tensor, call `.retain_grad()` before backward, or use `torch.autograd.grad`.
-
-### Gradient accumulation
-
-Gradients accumulate by default. Calling backward twice without clearing doubles them:
-
-```python
-x = torch.tensor([1.0, 2.0], requires_grad=True)
-for _ in range(2):
-    (x * 2).sum().backward()
-print(x.grad)                    # tensor([4., 4.])
-```
-
-The standard training loop clears gradients before each backward:
-
-```python
-optimizer.zero_grad(set_to_none=True)
-loss.backward()
-optimizer.step()
-```
-
-`set_to_none=True` releases gradient tensors instead of filling them with zeros. It is the modern default in PyTorch 2.x, but some code still checks for `None` before inspecting `.grad`.
-
-Gradient accumulation intentionally uses this behavior to simulate a larger batch:
-
-```python
-optimizer.zero_grad()
-for i, batch in enumerate(loader):
-    loss = compute_loss(batch)
-    (loss / accumulation_steps).backward()
-    if (i + 1) % accumulation_steps == 0:
-        optimizer.step()
-        optimizer.zero_grad()
-```
-
-Scale the loss by `accumulation_steps` so the effective gradient magnitude stays comparable to a full batch.
-
-### Stopping gradients
-
-- `tensor.detach()` returns a tensor sharing storage that is detached from the graph.
-- `with torch.no_grad():` disables graph recording inside the block.
-- `torch.inference_mode()` is stricter and faster for inference, but its tensors have restrictions if you later try to use them in autograd.
-
-```python
-x = torch.tensor([1.0, 2.0], requires_grad=True)
-with torch.no_grad():
-    y = x * 2
-print(y.requires_grad)           # False
-```
-
-`detach()` is for stopping gradient flow while keeping values; `.item()` and `.cpu()` are for extracting data. Detaching does not copy: mutations to a detached tensor can affect the original's storage. If you need an independent value, clone it.
-
-### Non-scalar outputs
-
-Calling `.backward()` on a tensor with more than one element requires an explicit upstream gradient:
-
-```python
-x = torch.tensor([1.0, 2.0], requires_grad=True)
-y = x * 2
-
-y.sum().backward()               # OK, scalar after sum
-# y.backward()                   # RuntimeError
-
-y = x * 2
-y.backward(torch.tensor([1.0, 10.0]))
-print(x.grad)                    # tensor([2., 20.])
-```
-
-Most training code reduces the loss to a scalar (mean or sum) before backward.
-
-### Graph lifetime and `retain_graph`
-
-By default, the graph is freed after backward. Calling backward again on the same graph raises an error unless you pass `retain_graph=True` or recompute the forward pass.
-
-```python
-x = torch.tensor(1.0, requires_grad=True)
-y = (x * 2).sum()
-y.backward()
-# y.backward()                   # RuntimeError: graph already freed
-```
-
-Use `retain_graph=True` only for legitimate multi-pass needs. In training loops, prefer a fresh forward pass for every backward.
-
-### `torch.autograd.grad`
-
-`torch.autograd.grad` returns gradients without populating `.grad`:
-
-```python
-x = torch.tensor([1.0, 2.0], requires_grad=True)
-y = (x ** 2).sum()
-(g,) = torch.autograd.grad(y, x)
-print(g)                         # tensor([2., 4.])
-print(x.grad)                    # None
-```
-
-It is useful for inspecting gradients, gradient penalties, and custom optimization.
-
-### Common autograd errors
-
-- **In-place operation on a leaf requiring grad:** `x += 1` raises an error. Use `x = x + 1` or modify under `torch.no_grad()`.
-- **In-place operation on a tensor needed for backward:** may raise “a variable needed for gradient computation has been modified by an inplace operation.”
-- **Detaching too early:** if you detach logits before computing the loss, weights receive no gradient.
-- **Using `.data`:** it bypasses autograd's safety checks. Prefer `.detach()` when you intentionally want an unconnected tensor.
-- **Forgetting `zero_grad`:** gradients accumulate across steps.
-
----
-
-## 9.4 Modules, layers, and parameters
-
-Subclass `torch.nn.Module` for models with parameters or child modules. Assigning a `Parameter` or another `Module` as an attribute registers it; assigning an ordinary tensor does not.
-
-```python
-import torch
-from torch import nn
-
-class MLP(nn.Module):
-    def __init__(self, in_features: int, hidden: int, out_features: int):
-        super().__init__()
-        self.fc1 = nn.Linear(in_features, hidden)
-        self.act = nn.ReLU()
-        self.fc2 = nn.Linear(hidden, out_features)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.fc2(self.act(self.fc1(x)))
-
-model = MLP(4, 16, 3)
-```
-
-Rules:
-
-- Call `super().__init__()` before assigning child modules.
-- Define the computation in `forward`.
-- Call `model(x)`, not `model.forward(x)`. The `__call__` path runs hooks and bookkeeping; directly calling `forward` skips them.
-- Layers are objects with their own parameters; they are not functions.
-- Module attributes are registered by assignment. Use `nn.ModuleList` for a list of layers, not a plain Python list, or the layers will not appear in `parameters()`.
-
-### Linear layer shapes
-
-`nn.Linear(in_features, out_features)` stores `weight` with shape `(out_features, in_features)` and `bias` with shape `(out_features,)`.
-
-```python
-layer = nn.Linear(3, 1)
-print(layer.weight.shape)        # torch.Size([1, 3])
-print(layer.bias.shape)          # torch.Size([1])
-
-x = torch.randn(4, 3)            # batch of 4, 3 features
-print(layer(x).shape)            # torch.Size([4, 1])
-```
-
-The layer applies `x @ weight.T + bias`. For inputs with more dimensions, the last dimension is transformed:
-
-```python
-x = torch.randn(2, 5, 3)
-print(layer(x).shape)            # torch.Size([2, 5, 1])
-```
-
-### Parameters and state
-
-```python
-for name, param in model.named_parameters():
-    print(name, tuple(param.shape), param.requires_grad)
-
-print(len(list(model.parameters())))
-print(model.state_dict().keys())
-```
-
-`state_dict()` includes parameters and registered buffers. Buffers are tensors that belong to the module but are not trained, such as running statistics in batch normalization.
-
-```python
-class Counter(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.register_buffer("steps", torch.tensor(0))
-
-    def forward(self, x):
-        self.steps += 1
-        return x
-```
-
-Plain tensor attributes are not registered:
-
-```python
-class Bad(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.scale = torch.tensor(2.0)   # not a parameter or buffer
-```
-
-`Bad().to("cpu")` will not move `scale`; `state_dict()` will not include it. Use `nn.Parameter` for learnable values and `register_buffer` for persistent non-learnable state.
-
-### Train and eval modes
-
-`model.train()` and `model.eval()` set a flag recursively on the module and its children. They do not enable or disable gradient computation; use `torch.no_grad()` for that.
-
-The flag changes the behavior of layers such as `Dropout` and `BatchNorm`:
-
-```python
-drop = nn.Dropout(p=0.5)
-x = torch.ones(10)
-print(drop.train()(x))           # some entries are zero, others scaled by 2
-print(drop.eval()(x))            # all ones
-```
-
-Always switch to eval mode for validation, testing, and inference. Forgetting this produces stochastic predictions with dropout and uses batch statistics instead of running statistics in batch normalization.
-
-### Initialization
-
-Default initialization is usually adequate, but custom initialization uses `torch.nn.init`:
-
-```python
-def init_weights(module: nn.Module) -> None:
-    if isinstance(module, nn.Linear):
-        nn.init.kaiming_uniform_(module.weight, nonlinearity="relu")
-        nn.init.zeros_(module.bias)
-
-model.apply(init_weights)
-```
-
-`model.apply(fn)` calls `fn` on every submodule, including the model itself. Initialization must happen before training and before loading a checkpoint.
-
-### Freezing parameters
-
-Set `requires_grad=False` to freeze a parameter. The optimizer may still contain it, but no gradient is produced, so no update occurs.
-
-```python
-for param in model.fc1.parameters():
-    param.requires_grad = False
-```
-
-After unfreezing, gradients resume on the next forward pass. If you create an optimizer before freezing, verify that its parameter groups contain what you expect.
-
----
-
-## 9.5 Loss functions, logits, and metrics
-
-A model normally outputs **logits** — unnormalized scores. Loss functions such as `CrossEntropyLoss` and `BCEWithLogitsLoss` apply the appropriate transformation internally for numerical stability. Do not apply softmax or sigmoid before these losses unless the loss explicitly expects probabilities.
-
-### Multiclass classification
-
-`nn.CrossEntropyLoss` combines `log_softmax` and negative log likelihood. It expects:
-
-- input shape `(N, C)` for `C` classes, or `(N, C, d1, d2, ...)` for higher-dimensional inputs
-- target shape `(N,)` or `(N, d1, d2, ...)` with integer class indices
-- target dtype `torch.int64` (or `torch.uint8` in some versions)
-
-```python
-logits = torch.tensor([[2.0, 0.0, 0.0],
-                       [0.0, 2.0, 0.0]])
-target = torch.tensor([0, 1])
-
-loss_fn = nn.CrossEntropyLoss()
-loss = loss_fn(logits, target)
-print(loss.item())                # ~0.2395
-```
-
-The calculation is stable because it uses log-softmax internally. Applying softmax first and then taking a log can underflow.
-
-```python
-probs = torch.softmax(logits, dim=1)
-print(probs.sum(dim=1))           # tensor([1., 1.])
-```
-
-`CrossEntropyLoss` options:
-
-- `reduction="mean"` (default), `"sum"`, or `"none"`.
-- `ignore_index=-100` ignores targets with that value.
-- `weight` assigns per-class weights for imbalance.
-- `label_smoothing` softens targets.
-
-Targets must not contain out-of-range class indices; that raises an error.
-
-### Binary and multilabel classification
-
-For binary classification with one logit per example, use `nn.BCEWithLogitsLoss`:
-
-```python
-logits = torch.tensor([0.0, 2.0])
-targets = torch.tensor([0.0, 1.0])   # float dtype, same shape
-
-loss = nn.BCEWithLogitsLoss()(logits, targets)
-print(loss.item())                    # ~0.4100
-```
-
-It combines sigmoid and binary cross entropy. If you already have probabilities, use `nn.BCELoss`, but avoid taking `log(0)` manually. For multilabel problems, use one logit per label and `BCEWithLogitsLoss`; do not use softmax across labels.
-
-### Regression
-
-```python
-pred = torch.tensor([1.0, 2.0, 3.0])
-target = torch.tensor([1.5, 2.0, 2.5])
-
-print(nn.MSELoss()(pred, target))
-print(nn.L1Loss()(pred, target))
-```
-
-MSE penalizes large errors more heavily; L1 is more robust to outliers. Both expect matching shapes or broadcastable shapes.
-
-### Metrics
-
-Accuracy for multiclass predictions:
-
-```python
-preds = logits.argmax(dim=1)
-correct = (preds == target).sum().item()
-accuracy = correct / target.numel()
-```
-
-For binary predictions:
-
-```python
-probs = torch.sigmoid(logits)
-preds = (probs >= 0.5).long()
-```
-
-Keep metric tensors detached and preferably on CPU:
-
-```python
-correct += (preds == target).sum().item()   # Python int, no graph
-```
-
-If you accumulate a tensor such as `total_loss += loss`, detach it with `total_loss += loss.detach()`. Otherwise you retain computation graphs and consume memory.
-
-For imbalanced data, accuracy can be misleading. Track precision, recall, F1, and the confusion matrix. A model that predicts the majority class can have high accuracy and zero recall for the minority class.
-
-A confusion matrix for binary labels:
-
-```python
-tp = ((preds == 1) & (target == 1)).sum().item()
-tn = ((preds == 0) & (target == 0)).sum().item()
-fp = ((preds == 1) & (target == 0)).sum().item()
-fn = ((preds == 0) & (target == 1)).sum().item()
-
-precision = tp / (tp + fp) if tp + fp else 0.0
-recall = tp / (tp + fn) if tp + fn else 0.0
-f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-```
-
-Guard against division by zero; an undefined precision should be reported explicitly, not turned into `NaN` silently.
-
----
-
-## 9.6 Datasets and DataLoader
-
-A map-style dataset implements `__len__` and `__getitem__`:
-
-```python
-from torch.utils.data import Dataset
-
-class ToyDataset(Dataset):
-    def __init__(self, x: torch.Tensor, y: torch.Tensor):
-        assert len(x) == len(y)
-        self.x = x
-        self.y = y
-
-    def __len__(self) -> int:
-        return len(self.x)
-
-    def __getitem__(self, index: int):
-        return self.x[index], self.y[index]
-```
-
-A `DataLoader` batches samples, optionally shuffles, and optionally uses worker processes:
-
-```python
-from torch.utils.data import DataLoader
-
-ds = ToyDataset(torch.randn(100, 4), torch.randint(0, 3, (100,)))
-loader = DataLoader(ds, batch_size=8, shuffle=True, drop_last=False)
-
-xb, yb = next(iter(loader))
-print(xb.shape, yb.shape)        # (8, 4) (8,)
-```
-
-Important behavior:
-
-- The default collate function stacks tensor samples along a new batch dimension.
-- `len(loader)` is `ceil(N / batch_size)` when `drop_last=False`, and `floor(N / batch_size)` when `drop_last=True`.
-- If `drop_last=True` and the dataset is smaller than the batch size, the loader yields zero batches.
-- `shuffle=True` uses the global random number generator; pass a `generator` for controlled shuffling.
-- Iterating a loader creates a fresh iterator and reshuffles when `shuffle=True`.
-- `num_workers=0` reads data in the main process. Positive values use worker processes; the dataset and collate function must be picklable, and worker-side mutations are not reflected in the parent process.
-- `persistent_workers=True` keeps workers alive between epochs and requires `num_workers > 0`.
-- `pin_memory=True` can speed up CPU-to-GPU transfers; it is unnecessary for CPU-only training.
-- `drop_last=True` avoids a final batch of size 1, which can break batch normalization.
-
-For reproducible shuffling:
-
-```python
-g = torch.Generator().manual_seed(42)
-loader = DataLoader(ds, batch_size=8, shuffle=True, generator=g)
-```
-
-For variable-length sequences, write a custom `collate_fn` that pads or truncates explicitly. The default collate function expects compatible shapes and raises when it cannot stack them.
-
-```python
-def pad_collate(batch):
-    xs, ys = zip(*batch)
-    lengths = torch.tensor([len(x) for x in xs])
-    padded = torch.nn.utils.rnn.pad_sequence(xs, batch_first=True)
-    return padded, torch.stack(ys), lengths
-```
-
-Batching is not just a performance detail. It changes gradient noise, batch-normalization statistics, and the meaning of a “step.” Report whether your metrics are per batch or per epoch, and weight batch losses by batch size when aggregating.
-
-Avoid fitting normalization statistics on the full dataset before splitting. Compute means and standard deviations on the training split only, then apply them to validation and test data. This is the same leakage rule from Chapter 7.
-
----
-
-## 9.7 The training loop
-
-A minimal training loop has a strict order:
-
-```python
-model.train()
-
-for epoch in range(num_epochs):
-    for xb, yb in train_loader:
-        xb = xb.to(device)
-        yb = yb.to(device)
-
-        optimizer.zero_grad(set_to_none=True)
-        logits = model(xb)
-        loss = loss_fn(logits, yb)
-        loss.backward()
-        optimizer.step()
-```
-
-The order matters:
-
-1. Clear old gradients.
-2. Forward pass.
-3. Compute loss.
-4. Backward pass.
-5. Update parameters.
-
-Forgetting `zero_grad` accumulates gradients across batches. Updating before `backward` uses stale gradients or no gradients at all.
-
-### Loss reporting
-
-`loss` is a tensor connected to the graph. Convert it to a Python float for logging:
-
-```python
-running_loss += loss.item() * xb.size(0)
-num_examples += xb.size(0)
-
-epoch_loss = running_loss / num_examples
-```
-
-Multiplying by the batch size gives the correct weighted average when the final batch is smaller. Averaging per-batch losses equally overweights small batches.
-
-### Optimizers
-
-```python
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.01)
-```
-
-- `SGD` with momentum is a strong baseline.
-- `Adam` adapts per-parameter step sizes; `AdamW` decouples weight decay from the gradient update.
-- `weight_decay` in Adam and AdamW is not identical to L2 regularization.
-- Create the optimizer after moving the model to its device and after any freezing decisions.
-- Parameter groups allow different learning rates for different parts of a model:
-
-```python
-optimizer = torch.optim.SGD([
-    {"params": model.fc1.parameters(), "lr": 1e-3},
-    {"params": model.fc2.parameters(), "lr": 1e-2},
-], momentum=0.9)
-```
-
-### Learning-rate schedulers
-
-Schedulers adjust the learning rate over time. The usual pattern is:
-
-```python
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
-
-for epoch in range(num_epochs):
-    train_one_epoch(...)
-    validate(...)
-    scheduler.step()
-```
-
-Some schedulers are stepped per batch; check the documentation. Calling `scheduler.step()` before the first `optimizer.step()` can skip the initial learning rate in older versions. Use the scheduler and optimizer together deliberately, and record the learning rate in logs.
-
-### Gradient clipping
-
-Clip gradients after backward and before the optimizer step:
-
-```python
-torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-optimizer.step()
-```
-
-Gradient clipping limits exploding gradients; it does not fix a learning rate that is too high or a loss that is already `NaN`.
-
-### Gradient accumulation
-
-For a large effective batch with limited memory:
-
-```python
-optimizer.zero_grad(set_to_none=True)
-
-for step, (xb, yb) in enumerate(loader):
-    logits = model(xb)
-    loss = loss_fn(logits, yb) / accumulation_steps
-    loss.backward()
-
-    if (step + 1) % accumulation_steps == 0:
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
-```
-
-If the dataset length is not divisible by `accumulation_steps`, handle the final partial group; otherwise its gradients are discarded without a step. Batch normalization statistics also see only the micro-batch, not the effective batch.
-
-### Validation
-
-```python
-model.eval()
-total_loss = 0.0
-total_correct = 0
-total = 0
-
-with torch.no_grad():
-    for xb, yb in val_loader:
-        xb = xb.to(device)
-        yb = yb.to(device)
-        logits = model(xb)
-        loss = loss_fn(logits, yb)
-        total_loss += loss.item() * xb.size(0)
-        total_correct += (logits.argmax(dim=1) == yb).sum().item()
-        total += yb.numel()
-
-val_loss = total_loss / total
-val_accuracy = total_correct / total
-```
-
-Switch back to `model.train()` before the next training epoch. Never update parameters during validation.
-
-### Sanity checks
-
-Before trusting a long run:
-
-1. Overfit a tiny batch. A correct model should drive the loss close to zero on a handful of examples.
-2. Check that the loss is finite and roughly plausible at initialization.
-3. Verify that predictions change after an optimizer step.
-4. Verify that validation uses `model.eval()` and `no_grad`.
-5. Verify that the number of optimizer steps matches your expectation.
-
-If the model cannot overfit a tiny batch, suspect a bug in shapes, labels, loss, optimizer wiring, or gradient flow before tuning hyperparameters.
-
----
-
-## 9.8 Evaluation, regularization, and reproducibility
-
-### Splits and leakage
-
-Use three splits when possible:
-
-- **Train:** fit parameters.
-- **Validation:** choose hyperparameters, early stopping, thresholds.
-- **Test:** estimate final performance once.
-
-Fit preprocessing, feature selection, and normalization on the training split only. If rows are grouped by user, patient, document, or time, split by group or time rather than randomly. A random split can leak information from the same entity into both training and validation.
-
-### Overfitting and underfitting
-
-Signals:
-
-- Training loss falls while validation loss rises: overfitting.
-- Both losses stay high: underfitting or a bug.
-- Training and validation are both perfect: the task may be too easy, or there is leakage.
-
-Tools:
-
-- More data or augmentation.
-- Weight decay.
-- Dropout.
-- Early stopping.
-- Smaller model.
-- Label smoothing.
-- Better features.
-
-Dropout is active only in training mode:
-
-```python
-model.train()
-# dropout samples a mask
-
-model.eval()
-# dropout is the identity
-```
-
-Batch normalization behaves differently in train and eval mode. In training it uses batch statistics and updates running estimates; in eval it uses the stored running statistics. A model evaluated in train mode can produce unstable or leaky results.
-
-### Early stopping
-
-```python
-best_val = float("inf")
-patience = 3
-bad_epochs = 0
-
-for epoch in range(max_epochs):
-    train_one_epoch(...)
-    val_loss = evaluate(...)
-
-    if val_loss < best_val:
-        best_val = val_loss
-        bad_epochs = 0
-        torch.save(model.state_dict(), "best.pt")
-    else:
-        bad_epochs += 1
-        if bad_epochs >= patience:
-            break
-```
-
-Early stopping uses the validation set, not the test set. Saving the best checkpoint is part of the loop, not an afterthought.
-
-### Metrics and thresholds
-
-For binary classification, the default threshold 0.5 is not sacred. Choose a threshold on validation data based on the cost of false positives versus false negatives. Report the threshold alongside precision and recall.
-
-Calibration is separate from ranking: a model can rank examples well while its probabilities are systematically too high or too low. If downstream decisions use probabilities, evaluate calibration; do not assume softmax or sigmoid outputs are calibrated.
-
-For imbalanced classes, consider:
-
-- class weights in the loss
-- a weighted sampler
-- threshold tuning
-- metrics other than accuracy
-
-### Reproducibility
-
-Seeds:
-
-```python
-import random
-
-def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-```
-
-`torch.manual_seed` seeds CPU and all CUDA devices. NumPy has its own generator; seed it separately if you use NumPy randomness.
-
-DataLoader workers:
-
-```python
-g = torch.Generator().manual_seed(seed)
-loader = DataLoader(ds, batch_size=32, shuffle=True, generator=g)
-```
-
-Each worker derives its own seed from the base seed. If you use randomness inside `__getitem__`, set a seed in `worker_init_fn` or use a dedicated `torch.Generator`; otherwise worker behavior may vary.
-
-Deterministic algorithms:
-
-```python
-torch.use_deterministic_algorithms(True)
-```
-
-This can make some operations raise when no deterministic implementation exists, and it can reduce performance. Set the required environment variable for CUDA matrix multiplications when the documentation asks for it. Reproducibility is a spectrum: record the seed, library versions, hardware, and nondeterministic operations rather than promising bitwise identity on every machine.
-
----
-
-## 9.9 Saving, loading, and inference
-
-The recommended format is a state dictionary, not the whole model object:
-
-```python
-torch.save(model.state_dict(), "model.pt")
-
-new_model = MLP(4, 16, 3)
-state = torch.load("model.pt", map_location="cpu")
-new_model.load_state_dict(state)
-new_model.eval()
-```
-
-Why `state_dict`:
-
-- It contains only tensors and buffers, not Python class references.
-- It loads reliably when the module is importable and the architecture is known.
-- It separates the model definition from the weights.
-
-Saving the whole model with `torch.save(model)` pickles class paths and is brittle when code moves or refactors. Use it only for throwaway local experiments.
-
-`load_state_dict` checks keys:
-
-```python
-result = new_model.load_state_dict(state, strict=False)
-print(result.missing_keys)
-print(result.unexpected_keys)
-```
-
-`strict=False` does not make a mismatch safe; inspect the missing and unexpected keys. A missing key often means a renamed layer or a different architecture; an unexpected key often means a checkpoint from another model.
-
-Checkpoints for resuming training should include more than weights:
-
-```python
-checkpoint = {
-    "model": model.state_dict(),
-    "optimizer": optimizer.state_dict(),
-    "scheduler": scheduler.state_dict() if scheduler else None,
-    "epoch": epoch,
-    "best_val_loss": best_val,
-    "seed": seed,
-    "config": config,
-}
-torch.save(checkpoint, "checkpoint.pt")
-```
-
-Loading a checkpoint:
-
-```python
-checkpoint = torch.load("checkpoint.pt", map_location=device, weights_only=True)
-model.load_state_dict(checkpoint["model"])
-optimizer.load_state_dict(checkpoint["optimizer"])
-start_epoch = checkpoint["epoch"] + 1
-```
-
-Recent PyTorch versions default `torch.load` to `weights_only=True` for security. A checkpoint containing arbitrary Python objects may require `weights_only=False`, which should be used only for trusted files. Never load an untrusted pickle. Verify the behavior of your installed version instead of assuming.
-
-### Inference
-
-```python
-model.eval()
-model.to(device)
-
-with torch.inference_mode():
-    for xb, _ in inference_loader:
-        logits = model(xb.to(device))
-        probs = torch.softmax(logits, dim=1)
-        predictions = probs.argmax(dim=1).cpu()
-```
-
-Inference rules:
-
-- Call `model.eval()`.
-- Disable autograd with `torch.inference_mode()` or `torch.no_grad()`.
-- Move inputs and model to the same device.
-- Convert outputs to CPU before passing them to Python code that expects CPU tensors.
-- Do not call `.item()` per element in a loop when vectorized conversion works.
-- Keep the input preprocessing identical to training preprocessing.
-
-`map_location` matters when loading a GPU checkpoint on a CPU-only machine or a checkpoint saved on a different device.
-
----
-
-## 9.10 Devices, performance, and mixed precision
-
-### Device mismatches
-
-A typical error:
-
-```text
-RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
-```
-
-Check three places:
-
-1. The model's parameters.
-2. The input batch.
-3. Constants or buffers created inside `forward` without a device.
-
-Move the model once, then move each batch:
-
-```python
-model = model.to(device)
-
-for xb, yb in loader:
-    xb = xb.to(device, non_blocking=True)
-    yb = yb.to(device, non_blocking=True)
-```
-
-`non_blocking=True` only helps with pinned memory and asynchronous transfers; it does not make CPU-only training faster.
-
-### Dtype mismatches
-
-A model initialized with `float32` parameters expects `float32` inputs:
-
-```python
-model = MLP(4, 16, 3).double()
-x = torch.randn(8, 4)               # float32
-# model(x)                          # RuntimeError: mat1 and mat2 must have the same dtype
-```
-
-Convert the input or the model, and keep the choice consistent through training and inference.
-
-### Mixed precision
-
-On CUDA, mixed precision uses lower-precision arithmetic for many operations while keeping master weights in higher precision. The modern API is:
-
-```python
-scaler = torch.amp.GradScaler("cuda")
-
-for xb, yb in loader:
-    optimizer.zero_grad(set_to_none=True)
-    with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-        logits = model(xb)
-        loss = loss_fn(logits, yb)
-
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
-```
-
-`GradScaler` reduces the risk of underflow in gradients. CPU mixed precision uses `bfloat16` where supported and does not use the same scaling strategy. Treat mixed precision as an optimization: verify numerical parity on a validation batch before trusting it, and benchmark rather than assuming it is faster.
-
-### Performance habits
-
-- Measure before optimizing. A short profiler run beats guessing.
-- Use a `DataLoader` with an appropriate `num_workers`; too many workers can thrash CPU and memory.
-- Avoid per-batch Python loops over individual elements.
-- Avoid `.item()` and `.cpu()` inside hot loops; they synchronize.
-- Use `torch.inference_mode()` for inference.
-- Use `torch.compile(model)` only after correctness is established; it adds compile time and can interact with dynamic shapes.
-- Do not retain computation graphs in metrics or logs.
-- Keep batch size and sequence length within memory; use gradient accumulation when needed.
-
----
-
-## 9.11 Debugging and common mistakes
-
-### Shape errors
-
-Print shapes at the boundary:
-
-```python
-print("input", xb.shape)
-print("logits", logits.shape)
-print("target", yb.shape)
-```
-
-Common causes:
-
-- `Linear` receives the wrong last dimension.
-- `CrossEntropyLoss` receives one-hot targets instead of class indices.
-- A model expects `(N, C, L)` but receives `(N, L)`.
-- A flatten operation removes the batch dimension.
-- Concatenation uses the wrong `dim`.
-
-### Device and dtype errors
-
-- Move the model and batch to the same device.
-- Match floating dtypes between inputs and parameters.
-- Integer targets stay integer; do not cast them to float for classification loss.
-- Boolean masks must have compatible shapes.
-
-### `NaN` or infinite loss
-
-Check:
-
-- learning rate too high
-- `log(0)` or division by zero
-- exploding gradients
-- invalid inputs (NaN/Inf)
-- loss computed on the wrong scale
-- mixed-precision overflow without scaling
-
-```python
-torch.autograd.set_detect_anomaly(True)
-```
-
-Anomaly detection is slow; use it temporarily to locate the offending operation. Check gradients after backward:
-
-```python
-for name, param in model.named_parameters():
-    if param.grad is not None:
-        print(name, param.grad.norm().item())
-```
-
-### Loss not decreasing
-
-Suspects:
-
-- missing `optimizer.zero_grad`
-- optimizer created before parameters were registered
-- parameters frozen or detached
-- learning rate far too high or too low
-- labels and logits misaligned
-- using `BCELoss` with logits
-- evaluating in train mode with dropout
-- data pipeline returning the same batch every time
-- loss computed under `no_grad`
-
-### Silent gradient problems
-
-If a parameter has `grad is None` after backward:
-
-- it was not used in the forward pass
-- it was detached
-- it has `requires_grad=False`
-- the loss does not depend on it
-- an in-place operation broke the graph
-
-### Common mistakes
-
-1. Calling `model.forward(x)` instead of `model(x)`.
-2. Forgetting `model.train()` or `model.eval()`.
-3. Applying softmax before `CrossEntropyLoss`.
-4. Passing float targets to `CrossEntropyLoss`.
-5. Forgetting `optimizer.zero_grad()`.
-6. Accumulating loss tensors without `.detach()`.
-7. Moving the model to a device but not the inputs.
-8. Creating a tensor on the GPU inside a worker process without need.
-9. Using `view` on a non-contiguous tensor.
-10. Assigning layers in a Python list instead of `nn.ModuleList`.
-11. Saving the whole model object instead of `state_dict`.
-12. Loading a checkpoint with mismatched keys and ignoring the warning.
-13. Evaluating with dropout active.
-14. Fitting normalization statistics on validation or test data.
-15. Reporting accuracy on imbalanced data without precision and recall.
-16. Tuning the threshold on the test set.
-17. Trusting a single random seed as proof of reproducibility.
-18. Assuming a GPU is faster for a tiny model without measuring.
-19. Keeping computation graphs alive through stored metrics.
-20. Tuning hyperparameters before confirming the model can overfit a tiny batch.
-
-### Conventions
-
-- Use explicit dtypes and devices at boundaries.
-- Keep datasets returning CPU tensors; move batches in the training loop.
-- Keep model code free of data loading and metric logging.
-- Use `state_dict` checkpoints with model, optimizer, scheduler, and metadata.
-- Log learning rate, loss, metrics, and gradient norms.
-- Use a fixed seed and record it with the run.
-- Validate shapes with small, hand-checked examples.
-- Prefer clear, small modules over deeply nested `nn.Sequential` structures.
-- Write a test that overfits one batch before launching a long training run.
-
----
-
 # Exercises
 
 Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
@@ -1468,6 +388,117 @@ Answer:
 
 ---
 
+## 9.2 Indexing, views, reshaping, and broadcasting
+
+Basic indexing follows NumPy syntax, with a crucial PyTorch difference: basic indexing returns views that share storage.
+
+```python
+x = torch.arange(6).reshape(2, 3)
+row = x[0]              # view, shape (3,)
+row[0] = 99
+print(x)                # row 0 now starts with 99
+```
+
+Slicing is also a view:
+
+```python
+block = x[:, 1:]        # view
+block.zero_()
+print(x)
+```
+
+Advanced indexing with an integer tensor or boolean mask returns a copy:
+
+```python
+x = torch.arange(6).reshape(2, 3)
+selected = x[[0, 1]]
+selected[0, 0] = -1
+print(x[0, 0])          # unchanged
+```
+
+Indexing rules worth remembering:
+
+- A Python integer removes a dimension; a slice keeps it.
+- `None` adds a dimension: `x[:, None]` has shape `(2, 1, 3)` for a `(2, 3)` input.
+- `...` fills in missing dimensions.
+- Boolean masks must broadcast to the indexed shape.
+- Integer-tensor indexing gathers entries; the result is a copy.
+- Assignment through basic indexing mutates the original; assignment through advanced indexing does not.
+
+### Reshape, view, and contiguity
+
+`reshape` changes shape when the number of elements is unchanged. It may return a view or a copy. `view` requires compatible strides and fails on non-contiguous tensors.
+
+```python
+x = torch.arange(6)
+print(x.view(2, 3).shape)       # OK: contiguous
+print(x.view(-1).shape)         # -1 infers one dimension
+
+t = torch.arange(6).reshape(2, 3).T
+print(t.shape)                  # (3, 2)
+print(t.is_contiguous())        # False
+# t.view(-1)                    # RuntimeError: incompatible strides
+print(t.reshape(-1).shape)      # (6,) works; may copy
+print(t.contiguous().view(-1))  # explicit copy then view
+```
+
+`transpose` swaps dimensions but does not move data; it changes strides. Calling `.contiguous()` forces a dense copy. Prefer `reshape` unless you specifically need a view and know the tensor is contiguous.
+
+`flatten`, `squeeze`, and `unsqueeze`:
+
+```python
+x = torch.ones(2, 3)
+print(x.flatten().shape)        # (6,)
+print(x.unsqueeze(0).shape)     # (1, 2, 3)
+print(x.unsqueeze(1).shape)     # (2, 1, 3)
+print(x.unsqueeze(0).squeeze(0).shape)  # (2, 3)
+```
+
+`torch.cat` joins along an existing dimension; `torch.stack` adds a new dimension:
+
+```python
+a = torch.zeros(2, 3)
+b = torch.ones(2, 3)
+print(torch.cat([a, b], dim=0).shape)    # (4, 3)
+print(torch.cat([a, b], dim=1).shape)    # (2, 6)
+print(torch.stack([a, b], dim=0).shape)  # (2, 2, 3)
+```
+
+### Broadcasting
+
+Broadcasting aligns dimensions from the right. A dimension of size 1 expands to match the other operand, and missing leading dimensions are treated as size 1.
+
+```python
+x = torch.ones(2, 3)
+v = torch.tensor([1.0, 2.0, 3.0])
+print((x + v).shape)             # (2, 3)
+
+col = torch.tensor([[1.0], [2.0]])   # (2, 1)
+print((x + col).shape)           # (2, 3)
+
+outer = torch.zeros(2, 1) + torch.zeros(1, 3)
+print(outer.shape)               # (2, 3)
+```
+
+Incompatible trailing dimensions raise an error:
+
+```python
+# torch.ones(2, 3) + torch.ones(4)   # RuntimeError
+```
+
+`expand` creates a view with stride 0 along expanded dimensions; `repeat` copies data:
+
+```python
+base = torch.zeros(1, 3)
+expanded = base.expand(4, 3)     # no copy
+repeated = base.repeat(4, 1)     # copy
+print(expanded.stride())         # (0, 1)
+```
+
+In-place operations on broadcast-expanded views are restricted. Avoid writing to an `expand`ed tensor; it is intended for read-only broadcasting.
+
+---
+
 ## Group B — Indexing, views, reshaping, and broadcasting
 
 **B1.** For `x = torch.arange(12).reshape(3, 4)`, predict each result exactly:
@@ -1721,6 +752,150 @@ torch.stack([a, b], dim=2)
 ```
 
 Then explain why `stack` with `dim=2` produces shape `(2, 3, 2)`.
+
+---
+
+## 9.3 Autograd and gradient mechanics
+
+PyTorch records operations on tensors whose `requires_grad` is `True` and builds a dynamic computation graph. Calling `.backward()` on a scalar output propagates gradients to leaf tensors.
+
+```python
+x = torch.tensor(2.0, requires_grad=True)
+y = x ** 2
+y.backward()
+print(x.grad)                    # tensor(4.)
+```
+
+Only floating-point and complex tensors can require gradients:
+
+```python
+# torch.tensor([1, 2], requires_grad=True)  # RuntimeError
+```
+
+### Leaves, non-leaves, and `.grad`
+
+A tensor created by the user with `requires_grad=True` is a leaf. Results of operations are non-leaf tensors with a `grad_fn`.
+
+```python
+x = torch.tensor([1.0, 2.0], requires_grad=True)
+y = x * 3
+print(x.is_leaf, y.is_leaf)      # True False
+print(type(y.grad_fn).__name__)  # MulBackward0
+```
+
+After `y.sum().backward()`, gradients are stored in the `.grad` attribute of leaf tensors by default, not in non-leaf tensors:
+
+```python
+x = torch.tensor([1.0, 2.0], requires_grad=True)
+y = (x * 3).sum()
+y.backward()
+print(x.grad)                    # tensor([3., 3.])
+```
+
+If you need the gradient of a non-leaf tensor, call `.retain_grad()` before backward, or use `torch.autograd.grad`.
+
+### Gradient accumulation
+
+Gradients accumulate by default. Calling backward twice without clearing doubles them:
+
+```python
+x = torch.tensor([1.0, 2.0], requires_grad=True)
+for _ in range(2):
+    (x * 2).sum().backward()
+print(x.grad)                    # tensor([4., 4.])
+```
+
+The standard training loop clears gradients before each backward:
+
+```python
+optimizer.zero_grad(set_to_none=True)
+loss.backward()
+optimizer.step()
+```
+
+`set_to_none=True` releases gradient tensors instead of filling them with zeros. It is the modern default in PyTorch 2.x, but some code still checks for `None` before inspecting `.grad`.
+
+Gradient accumulation intentionally uses this behavior to simulate a larger batch:
+
+```python
+optimizer.zero_grad()
+for i, batch in enumerate(loader):
+    loss = compute_loss(batch)
+    (loss / accumulation_steps).backward()
+    if (i + 1) % accumulation_steps == 0:
+        optimizer.step()
+        optimizer.zero_grad()
+```
+
+Scale the loss by `accumulation_steps` so the effective gradient magnitude stays comparable to a full batch.
+
+### Stopping gradients
+
+- `tensor.detach()` returns a tensor sharing storage that is detached from the graph.
+- `with torch.no_grad():` disables graph recording inside the block.
+- `torch.inference_mode()` is stricter and faster for inference, but its tensors have restrictions if you later try to use them in autograd.
+
+```python
+x = torch.tensor([1.0, 2.0], requires_grad=True)
+with torch.no_grad():
+    y = x * 2
+print(y.requires_grad)           # False
+```
+
+`detach()` is for stopping gradient flow while keeping values; `.item()` and `.cpu()` are for extracting data. Detaching does not copy: mutations to a detached tensor can affect the original's storage. If you need an independent value, clone it.
+
+### Non-scalar outputs
+
+Calling `.backward()` on a tensor with more than one element requires an explicit upstream gradient:
+
+```python
+x = torch.tensor([1.0, 2.0], requires_grad=True)
+y = x * 2
+
+y.sum().backward()               # OK, scalar after sum
+# y.backward()                   # RuntimeError
+
+y = x * 2
+y.backward(torch.tensor([1.0, 10.0]))
+print(x.grad)                    # tensor([2., 20.])
+```
+
+Most training code reduces the loss to a scalar (mean or sum) before backward.
+
+### Graph lifetime and `retain_graph`
+
+By default, the graph is freed after backward. Calling backward again on the same graph raises an error unless you pass `retain_graph=True` or recompute the forward pass.
+
+```python
+x = torch.tensor(1.0, requires_grad=True)
+y = (x * 2).sum()
+y.backward()
+# y.backward()                   # RuntimeError: graph already freed
+```
+
+Use `retain_graph=True` only for legitimate multi-pass needs. In training loops, prefer a fresh forward pass for every backward.
+
+### `torch.autograd.grad`
+
+`torch.autograd.grad` returns gradients without populating `.grad`:
+
+```python
+x = torch.tensor([1.0, 2.0], requires_grad=True)
+y = (x ** 2).sum()
+(g,) = torch.autograd.grad(y, x)
+print(g)                         # tensor([2., 4.])
+print(x.grad)                    # None
+```
+
+It is useful for inspecting gradients, gradient penalties, and custom optimization.
+
+### Common autograd errors
+
+- **In-place operation on a leaf requiring grad:** `x += 1` raises an error. Use `x = x + 1` or modify under `torch.no_grad()`.
+- **In-place operation on a tensor needed for backward:** may raise “a variable needed for gradient computation has been modified by an inplace operation.”
+- **Detaching too early:** if you detach logits before computing the loss, weights receive no gradient.
+- **Using `.data`:** it bypasses autograd's safety checks. Prefer `.detach()` when you intentionally want an unconnected tensor.
+- **Forgetting `zero_grad`:** gradients accumulate across steps.
 
 ---
 
@@ -2014,6 +1189,132 @@ print(x.requires_grad, y.requires_grad)
 ```
 
 Then explain why `detach()` is not a copy.
+
+---
+
+## 9.4 Modules, layers, and parameters
+
+Subclass `torch.nn.Module` for models with parameters or child modules. Assigning a `Parameter` or another `Module` as an attribute registers it; assigning an ordinary tensor does not.
+
+```python
+import torch
+from torch import nn
+
+class MLP(nn.Module):
+    def __init__(self, in_features: int, hidden: int, out_features: int):
+        super().__init__()
+        self.fc1 = nn.Linear(in_features, hidden)
+        self.act = nn.ReLU()
+        self.fc2 = nn.Linear(hidden, out_features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fc2(self.act(self.fc1(x)))
+
+model = MLP(4, 16, 3)
+```
+
+Rules:
+
+- Call `super().__init__()` before assigning child modules.
+- Define the computation in `forward`.
+- Call `model(x)`, not `model.forward(x)`. The `__call__` path runs hooks and bookkeeping; directly calling `forward` skips them.
+- Layers are objects with their own parameters; they are not functions.
+- Module attributes are registered by assignment. Use `nn.ModuleList` for a list of layers, not a plain Python list, or the layers will not appear in `parameters()`.
+
+### Linear layer shapes
+
+`nn.Linear(in_features, out_features)` stores `weight` with shape `(out_features, in_features)` and `bias` with shape `(out_features,)`.
+
+```python
+layer = nn.Linear(3, 1)
+print(layer.weight.shape)        # torch.Size([1, 3])
+print(layer.bias.shape)          # torch.Size([1])
+
+x = torch.randn(4, 3)            # batch of 4, 3 features
+print(layer(x).shape)            # torch.Size([4, 1])
+```
+
+The layer applies `x @ weight.T + bias`. For inputs with more dimensions, the last dimension is transformed:
+
+```python
+x = torch.randn(2, 5, 3)
+print(layer(x).shape)            # torch.Size([2, 5, 1])
+```
+
+### Parameters and state
+
+```python
+for name, param in model.named_parameters():
+    print(name, tuple(param.shape), param.requires_grad)
+
+print(len(list(model.parameters())))
+print(model.state_dict().keys())
+```
+
+`state_dict()` includes parameters and registered buffers. Buffers are tensors that belong to the module but are not trained, such as running statistics in batch normalization.
+
+```python
+class Counter(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("steps", torch.tensor(0))
+
+    def forward(self, x):
+        self.steps += 1
+        return x
+```
+
+Plain tensor attributes are not registered:
+
+```python
+class Bad(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scale = torch.tensor(2.0)   # not a parameter or buffer
+```
+
+`Bad().to("cpu")` will not move `scale`; `state_dict()` will not include it. Use `nn.Parameter` for learnable values and `register_buffer` for persistent non-learnable state.
+
+### Train and eval modes
+
+`model.train()` and `model.eval()` set a flag recursively on the module and its children. They do not enable or disable gradient computation; use `torch.no_grad()` for that.
+
+The flag changes the behavior of layers such as `Dropout` and `BatchNorm`:
+
+```python
+drop = nn.Dropout(p=0.5)
+x = torch.ones(10)
+print(drop.train()(x))           # some entries are zero, others scaled by 2
+print(drop.eval()(x))            # all ones
+```
+
+Always switch to eval mode for validation, testing, and inference. Forgetting this produces stochastic predictions with dropout and uses batch statistics instead of running statistics in batch normalization.
+
+### Initialization
+
+Default initialization is usually adequate, but custom initialization uses `torch.nn.init`:
+
+```python
+def init_weights(module: nn.Module) -> None:
+    if isinstance(module, nn.Linear):
+        nn.init.kaiming_uniform_(module.weight, nonlinearity="relu")
+        nn.init.zeros_(module.bias)
+
+model.apply(init_weights)
+```
+
+`model.apply(fn)` calls `fn` on every submodule, including the model itself. Initialization must happen before training and before loading a checkpoint.
+
+### Freezing parameters
+
+Set `requires_grad=False` to freeze a parameter. The optimizer may still contain it, but no gradient is produced, so no update occurs.
+
+```python
+for param in model.fc1.parameters():
+    param.requires_grad = False
+```
+
+After unfreezing, gradients resume on the next forward pass. If you create an optimizer before freezing, verify that its parameter groups contain what you expect.
 
 ---
 
@@ -2312,6 +1613,114 @@ Then explain why calling `model(x)` and `model.forward(x)` differ.
 
 ---
 
+## 9.5 Loss functions, logits, and metrics
+
+A model normally outputs **logits** — unnormalized scores. Loss functions such as `CrossEntropyLoss` and `BCEWithLogitsLoss` apply the appropriate transformation internally for numerical stability. Do not apply softmax or sigmoid before these losses unless the loss explicitly expects probabilities.
+
+### Multiclass classification
+
+`nn.CrossEntropyLoss` combines `log_softmax` and negative log likelihood. It expects:
+
+- input shape `(N, C)` for `C` classes, or `(N, C, d1, d2, ...)` for higher-dimensional inputs
+- target shape `(N,)` or `(N, d1, d2, ...)` with integer class indices
+- target dtype `torch.int64` (or `torch.uint8` in some versions)
+
+```python
+logits = torch.tensor([[2.0, 0.0, 0.0],
+                       [0.0, 2.0, 0.0]])
+target = torch.tensor([0, 1])
+
+loss_fn = nn.CrossEntropyLoss()
+loss = loss_fn(logits, target)
+print(loss.item())                # ~0.2395
+```
+
+The calculation is stable because it uses log-softmax internally. Applying softmax first and then taking a log can underflow.
+
+```python
+probs = torch.softmax(logits, dim=1)
+print(probs.sum(dim=1))           # tensor([1., 1.])
+```
+
+`CrossEntropyLoss` options:
+
+- `reduction="mean"` (default), `"sum"`, or `"none"`.
+- `ignore_index=-100` ignores targets with that value.
+- `weight` assigns per-class weights for imbalance.
+- `label_smoothing` softens targets.
+
+Targets must not contain out-of-range class indices; that raises an error.
+
+### Binary and multilabel classification
+
+For binary classification with one logit per example, use `nn.BCEWithLogitsLoss`:
+
+```python
+logits = torch.tensor([0.0, 2.0])
+targets = torch.tensor([0.0, 1.0])   # float dtype, same shape
+
+loss = nn.BCEWithLogitsLoss()(logits, targets)
+print(loss.item())                    # ~0.4100
+```
+
+It combines sigmoid and binary cross entropy. If you already have probabilities, use `nn.BCELoss`, but avoid taking `log(0)` manually. For multilabel problems, use one logit per label and `BCEWithLogitsLoss`; do not use softmax across labels.
+
+### Regression
+
+```python
+pred = torch.tensor([1.0, 2.0, 3.0])
+target = torch.tensor([1.5, 2.0, 2.5])
+
+print(nn.MSELoss()(pred, target))
+print(nn.L1Loss()(pred, target))
+```
+
+MSE penalizes large errors more heavily; L1 is more robust to outliers. Both expect matching shapes or broadcastable shapes.
+
+### Metrics
+
+Accuracy for multiclass predictions:
+
+```python
+preds = logits.argmax(dim=1)
+correct = (preds == target).sum().item()
+accuracy = correct / target.numel()
+```
+
+For binary predictions:
+
+```python
+probs = torch.sigmoid(logits)
+preds = (probs >= 0.5).long()
+```
+
+Keep metric tensors detached and preferably on CPU:
+
+```python
+correct += (preds == target).sum().item()   # Python int, no graph
+```
+
+If you accumulate a tensor such as `total_loss += loss`, detach it with `total_loss += loss.detach()`. Otherwise you retain computation graphs and consume memory.
+
+For imbalanced data, accuracy can be misleading. Track precision, recall, F1, and the confusion matrix. A model that predicts the majority class can have high accuracy and zero recall for the minority class.
+
+A confusion matrix for binary labels:
+
+```python
+tp = ((preds == 1) & (target == 1)).sum().item()
+tn = ((preds == 0) & (target == 0)).sum().item()
+fp = ((preds == 1) & (target == 0)).sum().item()
+fn = ((preds == 0) & (target == 1)).sum().item()
+
+precision = tp / (tp + fp) if tp + fp else 0.0
+recall = tp / (tp + fn) if tp + fn else 0.0
+f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+```
+
+Guard against division by zero; an undefined precision should be reported explicitly, not turned into `NaN` silently.
+
+---
+
 ## Group E — Loss functions, logits, and metrics
 
 **E1.** For logits of shape `(8, 5)` and class-index targets of shape `(8,)`, predict the shape of the loss under each reduction: `"none"`, `"sum"`, `"mean"`.
@@ -2523,6 +1932,73 @@ for xb, yb in loader:
 
 Then write a version that accumulates correctly and safely.
 
+## 9.6 Datasets and DataLoader
+
+A map-style dataset implements `__len__` and `__getitem__`:
+
+```python
+from torch.utils.data import Dataset
+
+class ToyDataset(Dataset):
+    def __init__(self, x: torch.Tensor, y: torch.Tensor):
+        assert len(x) == len(y)
+        self.x = x
+        self.y = y
+
+    def __len__(self) -> int:
+        return len(self.x)
+
+    def __getitem__(self, index: int):
+        return self.x[index], self.y[index]
+```
+
+A `DataLoader` batches samples, optionally shuffles, and optionally uses worker processes:
+
+```python
+from torch.utils.data import DataLoader
+
+ds = ToyDataset(torch.randn(100, 4), torch.randint(0, 3, (100,)))
+loader = DataLoader(ds, batch_size=8, shuffle=True, drop_last=False)
+
+xb, yb = next(iter(loader))
+print(xb.shape, yb.shape)        # (8, 4) (8,)
+```
+
+Important behavior:
+
+- The default collate function stacks tensor samples along a new batch dimension.
+- `len(loader)` is `ceil(N / batch_size)` when `drop_last=False`, and `floor(N / batch_size)` when `drop_last=True`.
+- If `drop_last=True` and the dataset is smaller than the batch size, the loader yields zero batches.
+- `shuffle=True` uses the global random number generator; pass a `generator` for controlled shuffling.
+- Iterating a loader creates a fresh iterator and reshuffles when `shuffle=True`.
+- `num_workers=0` reads data in the main process. Positive values use worker processes; the dataset and collate function must be picklable, and worker-side mutations are not reflected in the parent process.
+- `persistent_workers=True` keeps workers alive between epochs and requires `num_workers > 0`.
+- `pin_memory=True` can speed up CPU-to-GPU transfers; it is unnecessary for CPU-only training.
+- `drop_last=True` avoids a final batch of size 1, which can break batch normalization.
+
+For reproducible shuffling:
+
+```python
+g = torch.Generator().manual_seed(42)
+loader = DataLoader(ds, batch_size=8, shuffle=True, generator=g)
+```
+
+For variable-length sequences, write a custom `collate_fn` that pads or truncates explicitly. The default collate function expects compatible shapes and raises when it cannot stack them.
+
+```python
+def pad_collate(batch):
+    xs, ys = zip(*batch)
+    lengths = torch.tensor([len(x) for x in xs])
+    padded = torch.nn.utils.rnn.pad_sequence(xs, batch_first=True)
+    return padded, torch.stack(ys), lengths
+```
+
+Batching is not just a performance detail. It changes gradient noise, batch-normalization statistics, and the meaning of a “step.” Report whether your metrics are per batch or per epoch, and weight batch losses by batch size when aggregating.
+
+Avoid fitting normalization statistics on the full dataset before splitting. Compute means and standard deviations on the training split only, then apply them to validation and test data. This is the same leakage rule from Chapter 7.
+
+---
+
 ## Group F — Datasets and DataLoader
 
 **F1.** For the following dataset, predict `len(ds)`, the shape of `ds[0]`, and the types returned:
@@ -2690,6 +2166,150 @@ Then explain why `shuffle` and a `sampler` are mutually exclusive in the common 
 
 ---
 
+## 9.7 The training loop
+
+A minimal training loop has a strict order:
+
+```python
+model.train()
+
+for epoch in range(num_epochs):
+    for xb, yb in train_loader:
+        xb = xb.to(device)
+        yb = yb.to(device)
+
+        optimizer.zero_grad(set_to_none=True)
+        logits = model(xb)
+        loss = loss_fn(logits, yb)
+        loss.backward()
+        optimizer.step()
+```
+
+The order matters:
+
+1. Clear old gradients.
+2. Forward pass.
+3. Compute loss.
+4. Backward pass.
+5. Update parameters.
+
+Forgetting `zero_grad` accumulates gradients across batches. Updating before `backward` uses stale gradients or no gradients at all.
+
+### Loss reporting
+
+`loss` is a tensor connected to the graph. Convert it to a Python float for logging:
+
+```python
+running_loss += loss.item() * xb.size(0)
+num_examples += xb.size(0)
+
+epoch_loss = running_loss / num_examples
+```
+
+Multiplying by the batch size gives the correct weighted average when the final batch is smaller. Averaging per-batch losses equally overweights small batches.
+
+### Optimizers
+
+```python
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.01)
+```
+
+- `SGD` with momentum is a strong baseline.
+- `Adam` adapts per-parameter step sizes; `AdamW` decouples weight decay from the gradient update.
+- `weight_decay` in Adam and AdamW is not identical to L2 regularization.
+- Create the optimizer after moving the model to its device and after any freezing decisions.
+- Parameter groups allow different learning rates for different parts of a model:
+
+```python
+optimizer = torch.optim.SGD([
+    {"params": model.fc1.parameters(), "lr": 1e-3},
+    {"params": model.fc2.parameters(), "lr": 1e-2},
+], momentum=0.9)
+```
+
+### Learning-rate schedulers
+
+Schedulers adjust the learning rate over time. The usual pattern is:
+
+```python
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+
+for epoch in range(num_epochs):
+    train_one_epoch(...)
+    validate(...)
+    scheduler.step()
+```
+
+Some schedulers are stepped per batch; check the documentation. Calling `scheduler.step()` before the first `optimizer.step()` can skip the initial learning rate in older versions. Use the scheduler and optimizer together deliberately, and record the learning rate in logs.
+
+### Gradient clipping
+
+Clip gradients after backward and before the optimizer step:
+
+```python
+torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+optimizer.step()
+```
+
+Gradient clipping limits exploding gradients; it does not fix a learning rate that is too high or a loss that is already `NaN`.
+
+### Gradient accumulation
+
+For a large effective batch with limited memory:
+
+```python
+optimizer.zero_grad(set_to_none=True)
+
+for step, (xb, yb) in enumerate(loader):
+    logits = model(xb)
+    loss = loss_fn(logits, yb) / accumulation_steps
+    loss.backward()
+
+    if (step + 1) % accumulation_steps == 0:
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+```
+
+If the dataset length is not divisible by `accumulation_steps`, handle the final partial group; otherwise its gradients are discarded without a step. Batch normalization statistics also see only the micro-batch, not the effective batch.
+
+### Validation
+
+```python
+model.eval()
+total_loss = 0.0
+total_correct = 0
+total = 0
+
+with torch.no_grad():
+    for xb, yb in val_loader:
+        xb = xb.to(device)
+        yb = yb.to(device)
+        logits = model(xb)
+        loss = loss_fn(logits, yb)
+        total_loss += loss.item() * xb.size(0)
+        total_correct += (logits.argmax(dim=1) == yb).sum().item()
+        total += yb.numel()
+
+val_loss = total_loss / total
+val_accuracy = total_correct / total
+```
+
+Switch back to `model.train()` before the next training epoch. Never update parameters during validation.
+
+### Sanity checks
+
+Before trusting a long run:
+
+1. Overfit a tiny batch. A correct model should drive the loss close to zero on a handful of examples.
+2. Check that the loss is finite and roughly plausible at initialization.
+3. Verify that predictions change after an optimizer step.
+4. Verify that validation uses `model.eval()` and `no_grad`.
+5. Verify that the number of optimizer steps matches your expectation.
+
+If the model cannot overfit a tiny batch, suspect a bug in shapes, labels, loss, optimizer wiring, or gradient flow before tuning hyperparameters.
+
+---
+
 ## Group G — The training loop
 
 **G1.** Put the following operations in the correct order and explain why each position matters:
@@ -2818,6 +2438,119 @@ Then write the matching validation function using `eval()` and `no_grad()`.
 
 ---
 
+## 9.8 Evaluation, regularization, and reproducibility
+
+### Splits and leakage
+
+Use three splits when possible:
+
+- **Train:** fit parameters.
+- **Validation:** choose hyperparameters, early stopping, thresholds.
+- **Test:** estimate final performance once.
+
+Fit preprocessing, feature selection, and normalization on the training split only. If rows are grouped by user, patient, document, or time, split by group or time rather than randomly. A random split can leak information from the same entity into both training and validation.
+
+### Overfitting and underfitting
+
+Signals:
+
+- Training loss falls while validation loss rises: overfitting.
+- Both losses stay high: underfitting or a bug.
+- Training and validation are both perfect: the task may be too easy, or there is leakage.
+
+Tools:
+
+- More data or augmentation.
+- Weight decay.
+- Dropout.
+- Early stopping.
+- Smaller model.
+- Label smoothing.
+- Better features.
+
+Dropout is active only in training mode:
+
+```python
+model.train()
+# dropout samples a mask
+
+model.eval()
+# dropout is the identity
+```
+
+Batch normalization behaves differently in train and eval mode. In training it uses batch statistics and updates running estimates; in eval it uses the stored running statistics. A model evaluated in train mode can produce unstable or leaky results.
+
+### Early stopping
+
+```python
+best_val = float("inf")
+patience = 3
+bad_epochs = 0
+
+for epoch in range(max_epochs):
+    train_one_epoch(...)
+    val_loss = evaluate(...)
+
+    if val_loss < best_val:
+        best_val = val_loss
+        bad_epochs = 0
+        torch.save(model.state_dict(), "best.pt")
+    else:
+        bad_epochs += 1
+        if bad_epochs >= patience:
+            break
+```
+
+Early stopping uses the validation set, not the test set. Saving the best checkpoint is part of the loop, not an afterthought.
+
+### Metrics and thresholds
+
+For binary classification, the default threshold 0.5 is not sacred. Choose a threshold on validation data based on the cost of false positives versus false negatives. Report the threshold alongside precision and recall.
+
+Calibration is separate from ranking: a model can rank examples well while its probabilities are systematically too high or too low. If downstream decisions use probabilities, evaluate calibration; do not assume softmax or sigmoid outputs are calibrated.
+
+For imbalanced classes, consider:
+
+- class weights in the loss
+- a weighted sampler
+- threshold tuning
+- metrics other than accuracy
+
+### Reproducibility
+
+Seeds:
+
+```python
+import random
+
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+```
+
+`torch.manual_seed` seeds CPU and all CUDA devices. NumPy has its own generator; seed it separately if you use NumPy randomness.
+
+DataLoader workers:
+
+```python
+g = torch.Generator().manual_seed(seed)
+loader = DataLoader(ds, batch_size=32, shuffle=True, generator=g)
+```
+
+Each worker derives its own seed from the base seed. If you use randomness inside `__getitem__`, set a seed in `worker_init_fn` or use a dedicated `torch.Generator`; otherwise worker behavior may vary.
+
+Deterministic algorithms:
+
+```python
+torch.use_deterministic_algorithms(True)
+```
+
+This can make some operations raise when no deterministic implementation exists, and it can reduce performance. Set the required environment variable for CUDA matrix multiplications when the documentation asks for it. Reproducibility is a spectrum: record the seed, library versions, hardware, and nondeterministic operations rather than promising bitwise identity on every machine.
+
+---
+
 ## Group H — Evaluation, generalization, and reproducibility
 
 **H1.** Explain the roles of training, validation, and test sets. Answer:
@@ -2914,6 +2647,273 @@ For each, state what you would inspect next.
 4. Why is a random split not sufficient evidence of robustness?
 
 **H24.** Write a short evaluation report containing loss, accuracy, precision, recall, F1, confusion-matrix counts, threshold, and the size of each split. Then answer why reporting only a single accuracy number is inadequate.
+
+---
+
+## 9.9 Saving, loading, and inference
+
+The recommended format is a state dictionary, not the whole model object:
+
+```python
+torch.save(model.state_dict(), "model.pt")
+
+new_model = MLP(4, 16, 3)
+state = torch.load("model.pt", map_location="cpu")
+new_model.load_state_dict(state)
+new_model.eval()
+```
+
+Why `state_dict`:
+
+- It contains only tensors and buffers, not Python class references.
+- It loads reliably when the module is importable and the architecture is known.
+- It separates the model definition from the weights.
+
+Saving the whole model with `torch.save(model)` pickles class paths and is brittle when code moves or refactors. Use it only for throwaway local experiments.
+
+`load_state_dict` checks keys:
+
+```python
+result = new_model.load_state_dict(state, strict=False)
+print(result.missing_keys)
+print(result.unexpected_keys)
+```
+
+`strict=False` does not make a mismatch safe; inspect the missing and unexpected keys. A missing key often means a renamed layer or a different architecture; an unexpected key often means a checkpoint from another model.
+
+Checkpoints for resuming training should include more than weights:
+
+```python
+checkpoint = {
+    "model": model.state_dict(),
+    "optimizer": optimizer.state_dict(),
+    "scheduler": scheduler.state_dict() if scheduler else None,
+    "epoch": epoch,
+    "best_val_loss": best_val,
+    "seed": seed,
+    "config": config,
+}
+torch.save(checkpoint, "checkpoint.pt")
+```
+
+Loading a checkpoint:
+
+```python
+checkpoint = torch.load("checkpoint.pt", map_location=device, weights_only=True)
+model.load_state_dict(checkpoint["model"])
+optimizer.load_state_dict(checkpoint["optimizer"])
+start_epoch = checkpoint["epoch"] + 1
+```
+
+Recent PyTorch versions default `torch.load` to `weights_only=True` for security. A checkpoint containing arbitrary Python objects may require `weights_only=False`, which should be used only for trusted files. Never load an untrusted pickle. Verify the behavior of your installed version instead of assuming.
+
+### Inference
+
+```python
+model.eval()
+model.to(device)
+
+with torch.inference_mode():
+    for xb, _ in inference_loader:
+        logits = model(xb.to(device))
+        probs = torch.softmax(logits, dim=1)
+        predictions = probs.argmax(dim=1).cpu()
+```
+
+Inference rules:
+
+- Call `model.eval()`.
+- Disable autograd with `torch.inference_mode()` or `torch.no_grad()`.
+- Move inputs and model to the same device.
+- Convert outputs to CPU before passing them to Python code that expects CPU tensors.
+- Do not call `.item()` per element in a loop when vectorized conversion works.
+- Keep the input preprocessing identical to training preprocessing.
+
+`map_location` matters when loading a GPU checkpoint on a CPU-only machine or a checkpoint saved on a different device.
+
+---
+
+## 9.10 Devices, performance, and mixed precision
+
+### Device mismatches
+
+A typical error:
+
+```text
+RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+```
+
+Check three places:
+
+1. The model's parameters.
+2. The input batch.
+3. Constants or buffers created inside `forward` without a device.
+
+Move the model once, then move each batch:
+
+```python
+model = model.to(device)
+
+for xb, yb in loader:
+    xb = xb.to(device, non_blocking=True)
+    yb = yb.to(device, non_blocking=True)
+```
+
+`non_blocking=True` only helps with pinned memory and asynchronous transfers; it does not make CPU-only training faster.
+
+### Dtype mismatches
+
+A model initialized with `float32` parameters expects `float32` inputs:
+
+```python
+model = MLP(4, 16, 3).double()
+x = torch.randn(8, 4)               # float32
+# model(x)                          # RuntimeError: mat1 and mat2 must have the same dtype
+```
+
+Convert the input or the model, and keep the choice consistent through training and inference.
+
+### Mixed precision
+
+On CUDA, mixed precision uses lower-precision arithmetic for many operations while keeping master weights in higher precision. The modern API is:
+
+```python
+scaler = torch.amp.GradScaler("cuda")
+
+for xb, yb in loader:
+    optimizer.zero_grad(set_to_none=True)
+    with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+        logits = model(xb)
+        loss = loss_fn(logits, yb)
+
+    scaler.scale(loss).backward()
+    scaler.step(optimizer)
+    scaler.update()
+```
+
+`GradScaler` reduces the risk of underflow in gradients. CPU mixed precision uses `bfloat16` where supported and does not use the same scaling strategy. Treat mixed precision as an optimization: verify numerical parity on a validation batch before trusting it, and benchmark rather than assuming it is faster.
+
+### Performance habits
+
+- Measure before optimizing. A short profiler run beats guessing.
+- Use a `DataLoader` with an appropriate `num_workers`; too many workers can thrash CPU and memory.
+- Avoid per-batch Python loops over individual elements.
+- Avoid `.item()` and `.cpu()` inside hot loops; they synchronize.
+- Use `torch.inference_mode()` for inference.
+- Use `torch.compile(model)` only after correctness is established; it adds compile time and can interact with dynamic shapes.
+- Do not retain computation graphs in metrics or logs.
+- Keep batch size and sequence length within memory; use gradient accumulation when needed.
+
+---
+
+## 9.11 Debugging and common mistakes
+
+### Shape errors
+
+Print shapes at the boundary:
+
+```python
+print("input", xb.shape)
+print("logits", logits.shape)
+print("target", yb.shape)
+```
+
+Common causes:
+
+- `Linear` receives the wrong last dimension.
+- `CrossEntropyLoss` receives one-hot targets instead of class indices.
+- A model expects `(N, C, L)` but receives `(N, L)`.
+- A flatten operation removes the batch dimension.
+- Concatenation uses the wrong `dim`.
+
+### Device and dtype errors
+
+- Move the model and batch to the same device.
+- Match floating dtypes between inputs and parameters.
+- Integer targets stay integer; do not cast them to float for classification loss.
+- Boolean masks must have compatible shapes.
+
+### `NaN` or infinite loss
+
+Check:
+
+- learning rate too high
+- `log(0)` or division by zero
+- exploding gradients
+- invalid inputs (NaN/Inf)
+- loss computed on the wrong scale
+- mixed-precision overflow without scaling
+
+```python
+torch.autograd.set_detect_anomaly(True)
+```
+
+Anomaly detection is slow; use it temporarily to locate the offending operation. Check gradients after backward:
+
+```python
+for name, param in model.named_parameters():
+    if param.grad is not None:
+        print(name, param.grad.norm().item())
+```
+
+### Loss not decreasing
+
+Suspects:
+
+- missing `optimizer.zero_grad`
+- optimizer created before parameters were registered
+- parameters frozen or detached
+- learning rate far too high or too low
+- labels and logits misaligned
+- using `BCELoss` with logits
+- evaluating in train mode with dropout
+- data pipeline returning the same batch every time
+- loss computed under `no_grad`
+
+### Silent gradient problems
+
+If a parameter has `grad is None` after backward:
+
+- it was not used in the forward pass
+- it was detached
+- it has `requires_grad=False`
+- the loss does not depend on it
+- an in-place operation broke the graph
+
+### Common mistakes
+
+1. Calling `model.forward(x)` instead of `model(x)`.
+2. Forgetting `model.train()` or `model.eval()`.
+3. Applying softmax before `CrossEntropyLoss`.
+4. Passing float targets to `CrossEntropyLoss`.
+5. Forgetting `optimizer.zero_grad()`.
+6. Accumulating loss tensors without `.detach()`.
+7. Moving the model to a device but not the inputs.
+8. Creating a tensor on the GPU inside a worker process without need.
+9. Using `view` on a non-contiguous tensor.
+10. Assigning layers in a Python list instead of `nn.ModuleList`.
+11. Saving the whole model object instead of `state_dict`.
+12. Loading a checkpoint with mismatched keys and ignoring the warning.
+13. Evaluating with dropout active.
+14. Fitting normalization statistics on validation or test data.
+15. Reporting accuracy on imbalanced data without precision and recall.
+16. Tuning the threshold on the test set.
+17. Trusting a single random seed as proof of reproducibility.
+18. Assuming a GPU is faster for a tiny model without measuring.
+19. Keeping computation graphs alive through stored metrics.
+20. Tuning hyperparameters before confirming the model can overfit a tiny batch.
+
+### Conventions
+
+- Use explicit dtypes and devices at boundaries.
+- Keep datasets returning CPU tensors; move batches in the training loop.
+- Keep model code free of data loading and metric logging.
+- Use `state_dict` checkpoints with model, optimizer, scheduler, and metadata.
+- Log learning rate, loss, metrics, and gradient norms.
+- Use a fixed seed and record it with the run.
+- Validate shapes with small, hand-checked examples.
+- Prefer clear, small modules over deeply nested `nn.Sequential` structures.
+- Write a test that overfits one batch before launching a long training run.
 
 ---
 
@@ -3228,4 +3228,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Save and load `state_dict` checkpoints, resume training, and run batched inference.
 - Explain why evaluation uses `eval()` plus `no_grad()` or `inference_mode()`.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 10.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 10](../chapter-10/llm-apps.md).

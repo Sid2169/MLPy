@@ -62,530 +62,6 @@ FastAPI's request lifecycle: receive request → parse path/query/headers/body �
 
 ---
 
-## 5.2 A first FastAPI application
-
-```bash
-python -m pip install "fastapi[standard]"
-fastapi dev app/main.py          # development server with reload
-# or
-uvicorn app.main:app --reload
-```
-
-```python
-# app/main.py
-from fastapi import FastAPI
-
-app = FastAPI(title="Example API", version="0.1.0")
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-@app.get("/items/{item_id}")
-def read_item(item_id: int) -> dict[str, int]:
-    return {"item_id": item_id}
-```
-
-- `app = FastAPI()` is the application object. `uvicorn app.main:app` means "import `app` from `app/main.py`, then use the `app` object."
-- Decorators declare method and path. The function is the handler. Returned dicts/lists/models are serialized to JSON.
-- Use `def` handlers for synchronous code (FastAPI runs them in a worker thread) and `async def` only when the handler actually awaits (Chapter 6). Do not call blocking I/O inside `async def`.
-- `/docs` serves interactive documentation, `/redoc` alternative docs, and `/openapi.json` the machine-readable schema. They are generated from routes, type hints, and models.
-- The default success status is `200`; set `status_code=201` for creation.
-- Route matching is in declaration order. Declare specific paths such as `/users/me` before `/users/{user_id}`.
-- A path that exists with a different method returns `405 Method Not Allowed`.
-
-Group related routes in `APIRouter` objects:
-
-```python
-# app/routers/items.py
-from fastapi import APIRouter
-
-router = APIRouter(prefix="/items", tags=["items"])
-
-@router.get("")
-def list_items() -> list[dict[str, int]]:
-    return [{"id": 1}]
-```
-
-```python
-# app/main.py
-from app.routers import items
-
-app.include_router(items.router)
-```
-
----
-
-## 5.3 Path and query parameters
-
-Function parameter names that appear in the path template are path parameters; other scalar parameters are query parameters.
-
-```python
-from typing import Annotated
-from fastapi import FastAPI, Path, Query
-
-app = FastAPI()
-
-@app.get("/users/{user_id}")
-def get_user(
-    user_id: Annotated[int, Path(ge=1)],
-    verbose: Annotated[bool, Query()] = False,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> dict[str, object]:
-    return {"user_id": user_id, "verbose": verbose, "limit": limit}
-```
-
-- Type conversion happens automatically: `/users/abc` fails validation with `422`.
-- Missing required query parameters produce `422`; optional ones need a default, usually `None`.
-- Use `Annotated[T, Query(...)]` / `Path(...)` for constraints: `ge`, `gt`, `le`, `lt`, `min_length`, `max_length`, `pattern`.
-- `Query(alias="page-size")` maps an external name to a Python-safe parameter.
-- Repeated query parameters (`?tag=a&tag=b`) map to `list[str]`:
-
-```python
-@app.get("/search")
-def search(
-    q: Annotated[str, Query(min_length=1)],
-    tags: Annotated[list[str], Query()] = [],
-) -> dict[str, object]:
-    return {"q": q, "tags": tags}
-```
-
-- Header parameters use `Header`; underscores are converted to hyphens (`x_request_id` → `X-Request-ID`) unless you set `convert_underscores=False`.
-- The `Request` object exposes raw details (`request.headers`, `request.url`) when a typed parameter is not enough.
-
-Validation error shape (FastAPI default):
-
-```json
-{"detail": [{"type": "int_parsing", "loc": ["path", "user_id"], "msg": "...", "input": "abc"}]}
-```
-
-`loc` identifies where the problem is (`path`, `query`, `header`, `body`). Tests should assert the status, `loc`, and error type rather than exact message wording, which changes across Pydantic versions.
-
----
-
-## 5.4 Pydantic models and validation
-
-Pydantic models define schemas, validate input, coerce compatible types, and serialize output. FastAPI uses them for request bodies and response models.
-
-```python
-from pydantic import BaseModel, Field
-
-class UserCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    age: int = Field(ge=0, le=130)
-    tags: list[str] = Field(default_factory=list)
-
-class User(BaseModel):
-    id: int
-    name: str
-    age: int
-    tags: list[str]
-```
-
-Key rules:
-
-- Fields with no default are required. `x: int` is required; `x: int = 0` is optional with a default; `x: int | None = None` is optional and nullable. `x: int | None` without a default is required but may be `None`.
-- Validation errors raise `pydantic.ValidationError`, which FastAPI converts to `422` for request parsing.
-- Mutable defaults must use `Field(default_factory=list)`, never `tags: list[str] = []`.
-- By default Pydantic ignores unknown fields. To reject them, set `model_config = ConfigDict(extra="forbid")`, which turns typos into `422` errors.
-- Nested models validate recursively; error `loc` values show the nesting path, e.g. `["body", "items", 0, "price"]`.
-- `model_dump()` → dict (Python objects preserved, e.g. `datetime`); `model_dump(mode="json")` → JSON-compatible primitives; `model_dump_json()` → JSON string.
-- `model_validate(obj)` → model from a dict; `model_validate_json(text)` → model from a JSON string.
-- `model_copy(update={...})` returns a copy, but note that it does not run validation on the update.
-
-Field constraints (`gt`, `ge`, `lt`, `le`, `min_length`, `max_length`, `pattern`, `multiple_of`) and documentation (`title`, `description`, `examples`) are declared with `Field`:
-
-```python
-from pydantic import BaseModel, Field
-
-class ItemCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100, description="Display name")
-    price_cents: int = Field(gt=0, description="Price in cents")
-    sku: str = Field(pattern=r"^[A-Z0-9-]{3,20}$")
-```
-
-Custom validation:
-
-```python
-from pydantic import BaseModel, field_validator, model_validator
-
-class Window(BaseModel):
-    start: int
-    end: int
-
-    @field_validator("start", "end")
-    @classmethod
-    def non_negative(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError("must be non-negative")
-        return value
-
-    @model_validator(mode="after")
-    def check_order(self) -> "Window":
-        if self.start >= self.end:
-            raise ValueError("start must be before end")
-        return self
-```
-
-Configuration options live in `model_config`:
-
-```python
-from pydantic import BaseModel, ConfigDict
-
-class StrictUser(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    name: str
-```
-
-Input and output models should usually be separate. `UserCreate` validates input; `User` documents the response without fields the client must not see (password hashes, internal flags). FastAPI's `response_model` filters to exactly the declared fields — a security boundary, not just documentation.
-
----
-
-## 5.5 Request bodies, responses, and serialization
-
-A Pydantic model parameter is read from the JSON body:
-
-```python
-from fastapi import FastAPI, status
-
-app = FastAPI()
-
-class ItemCreate(BaseModel):
-    name: str
-    price_cents: int
-
-class Item(BaseModel):
-    id: int
-    name: str
-    price_cents: int
-
-@app.post("/items", status_code=status.HTTP_201_CREATED, response_model=Item)
-def create_item(payload: ItemCreate) -> Item:
-    return Item(id=1, name=payload.name, price_cents=payload.price_cents)
-```
-
-- The body must be valid JSON and match the model, otherwise `422`.
-- `response_model` validates and serializes the result, and strips undeclared fields. A route cannot accidentally leak `password_hash` if `User` does not include it.
-- FastAPI also accepts the return annotation as the response model (`-> Item`), so `response_model` can be omitted when they agree.
-- `response_model_exclude_none=True` removes `None` fields from output; `response_model_exclude_unset=True` omits fields the model never received.
-- `list[Item]` is a valid response model.
-- `status_code=204` means no content; return `None` and set `response_model=None`. `201` is correct for resource creation.
-- To set response headers or status dynamically, declare `response: Response` and mutate it:
-
-```python
-from fastapi import Response
-
-@app.post("/items")
-def create_item(payload: ItemCreate, response: Response) -> Item:
-    response.headers["X-Request-ID"] = "abc"
-    response.status_code = status.HTTP_201_CREATED
-    ...
-```
-
-- Multiple body parameters become keys of one JSON object; wrap a single model with `Body(embed=True)` if the client sends `{"item": {...}}`:
-
-```python
-from fastapi import Body
-
-@app.post("/orders")
-def create_order(item: Annotated[ItemCreate, Body(embed=True)]) -> dict[str, str]:
-    return {"status": "created"}
-```
-
-- `JSONResponse` and `RedirectResponse` bypass response-model serialization; use them deliberately (custom error formats, redirects).
-- Serialization of `datetime`, `date`, `UUID`, and enums is automatic when using `model_dump(mode="json")` or response models.
-
----
-
-## 5.6 Error handling
-
-Raise `HTTPException` for expected HTTP failures:
-
-```python
-from fastapi import HTTPException, status
-
-def get_item_or_404(item_id: int) -> Item:
-    item = find_item(item_id)
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
-    return item
-```
-
-- `detail` may be a string or a JSON-serializable structure. FastAPI returns `{"detail": ...}`.
-- Pass `headers={"WWW-Authenticate": "Bearer"}` for `401` responses.
-- Validation failures are handled by FastAPI as `422` with the standard error list. You can customize the handler for `RequestValidationError` if the API needs a different error envelope.
-
-Domain exceptions should not be HTTP-aware. Define a taxonomy and translate at the HTTP boundary:
-
-```python
-class UpstreamError(Exception):
-    """The external service failed in a non-retryable way."""
-
-class UpstreamTimeout(Exception):
-    """The external service did not respond in time."""
-
-from fastapi import Request
-from fastapi.responses import JSONResponse
-
-@app.exception_handler(UpstreamError)
-def handle_upstream(request: Request, exc: UpstreamError) -> JSONResponse:
-    logger.warning("upstream failure: %s", exc)
-    return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY,
-                        content={"detail": "upstream service failed"})
-
-@app.exception_handler(UpstreamTimeout)
-def handle_timeout(request: Request, exc: UpstreamTimeout) -> JSONResponse:
-    logger.warning("upstream timeout: %s", exc)
-    return JSONResponse(status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                        content={"detail": "upstream timed out"})
-```
-
-Rules:
-
-- Register handlers with `@app.exception_handler(...)` or `app.add_exception_handler(...)`. The handler must return a `Response`.
-- Handlers are selected by exception type; subclasses match parent handlers unless a more specific handler exists.
-- Never return raw exception text, upstream bodies, headers, or stack traces to clients. Log details server-side; return a stable, generic message.
-- Unhandled exceptions become `500`. In `TestClient`, they re-raise by default (useful for debugging); instantiate `TestClient(app, raise_server_exceptions=False)` to assert a 500 response.
-- `HTTPException` subclasses exception handling; do not wrap it in a broad `except Exception` that turns it into `500`.
-- Consistent error envelopes help clients: for example `{"error": {"code": "not_found", "message": "..."}}`. If you change the format, do it with a global handler, not route by route.
-
----
-
-## 5.7 Dependencies and configuration
-
-FastAPI's dependency injection supplies shared logic and objects to handlers. A dependency is any callable; declare it with `Depends`.
-
-```python
-from functools import lru_cache
-from typing import Annotated
-from fastapi import Depends, FastAPI
-
-@lru_cache
-def get_settings() -> Settings:
-    return load_settings(dict(os.environ))       # Chapter 3
-
-SettingsDep = Annotated[Settings, Depends(get_settings)]
-
-@app.get("/config-check")
-def config_check(settings: SettingsDep) -> dict[str, str]:
-    return {"base_url": settings.base_url}
-```
-
-- `@lru_cache` builds settings once per process; without it, `get_settings` runs per request. Cache expensive immutable objects, not request-specific state.
-- FastAPI caches a dependency's result within a single request by default; different requests call it again (unless it has its own cache).
-- Dependencies can depend on other dependencies, read headers, enforce auth, and raise `HTTPException`.
-- A `yield` dependency provides setup and cleanup:
-
-```python
-def get_client(request: Request) -> Iterator[httpx.Client]:
-    client = httpx.Client(base_url=request.app.state.base_url, timeout=10.0)
-    try:
-        yield client
-    finally:
-        client.close()
-
-ClientDep = Annotated[httpx.Client, Depends(get_client)]
-```
-
-Code after `yield` runs after the response is sent, and runs even when the handler raises. This is the place for closing connections and releasing locks.
-
-- Prefer a single long-lived client created at application startup, stored on `app.state`, and yielded per request without creating a new one:
-
-```python
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    app.state.client = httpx.Client(base_url=settings.base_url, timeout=10.0)
-    yield
-    app.state.client.close()
-
-app = FastAPI(lifespan=lifespan)
-
-def get_client(request: Request) -> httpx.Client:
-    return request.app.state.client
-```
-
-The `async`/`asynccontextmanager` syntax is Chapter 6 material; treat it as the standard startup template for now. The dependency is what handlers and tests interact with.
-
-- Dependency overrides are the testing seam:
-
-```python
-app.dependency_overrides[get_settings] = lambda: test_settings
-app.dependency_overrides[get_client] = lambda: fake_client
-```
-
-Clear overrides after each test to avoid leakage.
-
-- Dependencies can be applied at router or app level: `APIRouter(dependencies=[Depends(verify_token)])`, `FastAPI(dependencies=[...])`. Use this for cross-cutting auth, not for business logic.
-- Class-based dependencies (an object with `__call__`) are useful when a dependency needs state; a closure or plain function is usually simpler.
-- Keep configuration out of route bodies: inject settings, clients, and services. Route handlers should read like a short orchestration script.
-
----
-
-## 5.8 Calling external services
-
-Keep HTTP calls in a service/client layer, not inside route bodies. The layer should be testable without FastAPI and should not raise `HTTPException`.
-
-```python
-import httpx
-
-class WeatherService:
-    def __init__(self, client: httpx.Client):
-        self._client = client
-
-    def current(self, city: str) -> dict[str, object]:
-        try:
-            response = self._client.get("/weather", params={"city": city})
-            response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise UpstreamTimeout(f"weather timeout for {city}") from exc
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code >= 500:
-                raise UpstreamError(f"weather status {exc.response.status_code}") from exc
-            raise UpstreamBadRequest(f"weather rejected city {city}") from exc
-        except httpx.RequestError as exc:
-            raise UpstreamError("weather connection failed") from exc
-
-        try:
-            return response.json()
-        except ValueError as exc:
-            raise UpstreamError("weather returned invalid JSON") from exc
-```
-
-```python
-@app.get("/weather/{city}")
-def weather(city: str, settings: SettingsDep, client: ClientDep) -> dict[str, object]:
-    service = WeatherService(client)
-    return service.current(city)
-```
-
-- Registration of the service as a dependency is optional; constructing it per request with shared collaborators is cheap.
-- Map upstream failures to meaningful local statuses: timeout → `504`, upstream 5xx/invalid body → `502`, upstream 4xx caused by caller input → `400` or `404` depending on meaning. Do not blindly pass a `500` through.
-- Always set timeouts. Retry only transient failures (timeouts, connection errors, 429, 5xx) with a small bound; never retry 4xx. The route-level outcome after exhausting retries is typically `503` or `504`.
-- Never forward upstream error bodies or headers to clients; they may contain internal details or secrets. Log a sanitized summary.
-- Reuse the client (Chapter 3). Creating one per request loses connection pooling.
-- Bound response sizes if you parse arbitrary upstream JSON; do not assume the shape. Validate with a Pydantic model when the response feeds business logic.
-- Idempotency: retrying a `POST` can duplicate effects. Prefer `PUT`/`DELETE` when designing retryable endpoints, or require an idempotency key (advanced; Chapter 8).
-
----
-
-## 5.9 Structuring the application
-
-A scalable layout:
-
-```text
-app/
-├── main.py            # FastAPI(), lifespan, include_router, exception handlers
-├── config.py          # Settings + load_settings (Chapter 3)
-├── dependencies.py    # get_settings, get_client, auth dependencies
-├── schemas.py         # Pydantic request/response models
-├── services.py        # business logic + upstream calls; no FastAPI imports
-└── routers/
-    ├── __init__.py
-    ├── items.py
-    └── weather.py
-```
-
-Principles:
-
-- Route handlers parse/validate, call services, and translate results or domain exceptions into HTTP responses. No database or HTTP client code inline.
-- `services.py` contains the logic you can unit test without starting the app. It raises domain exceptions, not `HTTPException`.
-- `schemas.py` defines input and output models; keep secrets out of output models.
-- `dependencies.py` wires configuration and clients; this is the seam for test overrides.
-- `main.py` assembles routers, lifespan, and handlers. Keep it boring.
-- Do not let Pydantic models leak into domain logic as mutable state holders; converting to dataclasses/domain objects is optional but useful as complexity grows.
-- One router per resource, with `prefix` and `tags`; avoid a 500-line `main.py`.
-
----
-
-## 5.10 Testing the API
-
-`TestClient` (built on `httpx`) calls the app in-process, with no network and no server process:
-
-```python
-from fastapi.testclient import TestClient
-from app.main import app
-
-client = TestClient(app)
-
-def test_health():
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-
-def test_missing_item():
-    response = client.get("/items/999")
-    assert response.status_code == 404
-    assert response.json() == {"detail": "Item not found"}
-```
-
-Testing validation failures:
-
-```python
-def test_invalid_user_id():
-    response = client.get("/users/abc")
-    assert response.status_code == 422
-    detail = response.json()["detail"]
-    assert detail[0]["loc"] == ["path", "user_id"]
-    assert detail[0]["type"] == "int_parsing"
-
-def test_body_validation():
-    response = client.post("/items", json={"name": "", "price_cents": -5})
-    assert response.status_code == 422
-    locations = {tuple(err["loc"]) for err in response.json()["detail"]}
-    assert ("body", "name") in locations
-    assert ("body", "price_cents") in locations
-```
-
-Rules and tools:
-
-- Use fixtures (Chapter 4) to build a `TestClient` and to install/clear `app.dependency_overrides` around each test.
-- Override dependencies instead of patching internals: `app.dependency_overrides[get_client] = lambda: fake_client`. A `yield` fixture clears the dict afterward.
-- Test the full contract: status code, response body shape, required headers, and absence of sensitive fields.
-- Test error paths: missing resource, invalid path/query/body, conflict, upstream failure, timeout, malformed upstream JSON.
-- Use a real `httpx.MockTransport` at the service layer to simulate upstream behavior without network (Chapters 3–4).
-- For unhandled exceptions, `TestClient(app, raise_server_exceptions=False)` lets you assert `500`.
-- Test services directly (plain unit tests) for mapping logic, and routes for wiring. Do not duplicate every service test at the HTTP layer.
-- The OpenAPI schema is testable: `client.get("/openapi.json")` should be `200` and include expected paths and required fields.
-- Async app tests via `httpx.AsyncClient(transport=ASGITransport(app=app))` arrive in Chapter 6; `TestClient` is sufficient for synchronous handlers.
-
----
-
-## 5.11 Common mistakes and conventions
-
-Mistakes to avoid:
-
-1. Returning ORM objects or dicts with extra fields instead of response models (leaks secrets).
-2. Missing `response_model`/return annotation, so output shape drifts silently.
-3. Catching all exceptions and converting them to `500`, including `HTTPException`.
-4. Exposing upstream error bodies, headers, stack traces, or tokens to clients.
-5. Forgetting timeouts on external calls.
-6. Creating an `httpx.Client` per request; not closing clients.
-7. Putting business logic and HTTP calls directly in route functions.
-8. Declaring `async def` handlers that call blocking I/O.
-9. Using mutable defaults in Pydantic models instead of `default_factory`.
-10. Relying on validation-error message text instead of `loc`/`type` in tests.
-11. Tests that hit real APIs or depend on environment variables without overriding dependencies.
-12. Letting dependency overrides leak across tests.
-13. Retrying non-idempotent `POST` requests or retrying `4xx` errors.
-14. Using `422` for business-rule failures that belong to `400`/`409`.
-15. Adding `response_model` fields that include internal identifiers or secrets.
-
-Conventions to adopt:
-
-- Separate `ItemCreate` (input) from `Item` (output) models.
-- `response_model` or return annotations on every route.
-- `status_code=201` for creation, `204` for successful empty responses.
-- Dependency injection for settings, clients, and auth; override them in tests.
-- Domain exceptions in services, mapped to `HTTPException`/handlers at the boundary.
-- One router per resource; thin handlers, tested services.
-- `TestClient` fixtures plus `dependency_overrides`; `MockTransport` for upstream behavior.
-- Structured logs with request IDs; no secrets, no raw upstream bodies.
-
----
-
 # Exercises
 
 Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
@@ -792,6 +268,60 @@ GET    /books/{id} (absent)   → 200 with {"error": "not found"}
 
 ---
 
+## 5.2 A first FastAPI application
+
+```bash
+python -m pip install "fastapi[standard]"
+fastapi dev app/main.py          # development server with reload
+# or
+uvicorn app.main:app --reload
+```
+
+```python
+# app/main.py
+from fastapi import FastAPI
+
+app = FastAPI(title="Example API", version="0.1.0")
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int) -> dict[str, int]:
+    return {"item_id": item_id}
+```
+
+- `app = FastAPI()` is the application object. `uvicorn app.main:app` means "import `app` from `app/main.py`, then use the `app` object."
+- Decorators declare method and path. The function is the handler. Returned dicts/lists/models are serialized to JSON.
+- Use `def` handlers for synchronous code (FastAPI runs them in a worker thread) and `async def` only when the handler actually awaits (Chapter 6). Do not call blocking I/O inside `async def`.
+- `/docs` serves interactive documentation, `/redoc` alternative docs, and `/openapi.json` the machine-readable schema. They are generated from routes, type hints, and models.
+- The default success status is `200`; set `status_code=201` for creation.
+- Route matching is in declaration order. Declare specific paths such as `/users/me` before `/users/{user_id}`.
+- A path that exists with a different method returns `405 Method Not Allowed`.
+
+Group related routes in `APIRouter` objects:
+
+```python
+# app/routers/items.py
+from fastapi import APIRouter
+
+router = APIRouter(prefix="/items", tags=["items"])
+
+@router.get("")
+def list_items() -> list[dict[str, int]]:
+    return [{"id": 1}]
+```
+
+```python
+# app/main.py
+from app.routers import items
+
+app.include_router(items.router)
+```
+
+---
+
 ## Group B — FastAPI basics and routing
 
 **B1.** You created `app/main.py` containing `app = FastAPI()`. Answer:
@@ -972,6 +502,53 @@ Explain the difference for a load balancer and for a container orchestrator, and
 
 ---
 
+## 5.3 Path and query parameters
+
+Function parameter names that appear in the path template are path parameters; other scalar parameters are query parameters.
+
+```python
+from typing import Annotated
+from fastapi import FastAPI, Path, Query
+
+app = FastAPI()
+
+@app.get("/users/{user_id}")
+def get_user(
+    user_id: Annotated[int, Path(ge=1)],
+    verbose: Annotated[bool, Query()] = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict[str, object]:
+    return {"user_id": user_id, "verbose": verbose, "limit": limit}
+```
+
+- Type conversion happens automatically: `/users/abc` fails validation with `422`.
+- Missing required query parameters produce `422`; optional ones need a default, usually `None`.
+- Use `Annotated[T, Query(...)]` / `Path(...)` for constraints: `ge`, `gt`, `le`, `lt`, `min_length`, `max_length`, `pattern`.
+- `Query(alias="page-size")` maps an external name to a Python-safe parameter.
+- Repeated query parameters (`?tag=a&tag=b`) map to `list[str]`:
+
+```python
+@app.get("/search")
+def search(
+    q: Annotated[str, Query(min_length=1)],
+    tags: Annotated[list[str], Query()] = [],
+) -> dict[str, object]:
+    return {"q": q, "tags": tags}
+```
+
+- Header parameters use `Header`; underscores are converted to hyphens (`x_request_id` → `X-Request-ID`) unless you set `convert_underscores=False`.
+- The `Request` object exposes raw details (`request.headers`, `request.url`) when a typed parameter is not enough.
+
+Validation error shape (FastAPI default):
+
+```json
+{"detail": [{"type": "int_parsing", "loc": ["path", "user_id"], "msg": "...", "input": "abc"}]}
+```
+
+`loc` identifies where the problem is (`path`, `query`, `header`, `body`). Tests should assert the status, `loc`, and error type rather than exact message wording, which changes across Pydantic versions.
+
+---
+
 ## Group C — Path and query parameters
 
 **C1.** Declare `GET /books/{book_id}` with `book_id: int` and return `{"book_id": book_id}`. Then write the three request URLs a client would use to fetch books 1, 42, and 100, and predict each response body.
@@ -1121,6 +698,84 @@ GET /books?q=...&tags=...&tags=...&sort=title|price|published_at&direction=asc|d
 ```
 
 Requirements: `q` optional but at least two characters when present; `tags` repeatable; `sort` and `direction` restricted to enum values; `limit` 1–100 with default 20; `offset` at least 0 with default 0. Write the parameter declarations and the types you would use. Then list the requests you would use to test the boundaries.
+
+---
+
+## 5.4 Pydantic models and validation
+
+Pydantic models define schemas, validate input, coerce compatible types, and serialize output. FastAPI uses them for request bodies and response models.
+
+```python
+from pydantic import BaseModel, Field
+
+class UserCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    age: int = Field(ge=0, le=130)
+    tags: list[str] = Field(default_factory=list)
+
+class User(BaseModel):
+    id: int
+    name: str
+    age: int
+    tags: list[str]
+```
+
+Key rules:
+
+- Fields with no default are required. `x: int` is required; `x: int = 0` is optional with a default; `x: int | None = None` is optional and nullable. `x: int | None` without a default is required but may be `None`.
+- Validation errors raise `pydantic.ValidationError`, which FastAPI converts to `422` for request parsing.
+- Mutable defaults must use `Field(default_factory=list)`, never `tags: list[str] = []`.
+- By default Pydantic ignores unknown fields. To reject them, set `model_config = ConfigDict(extra="forbid")`, which turns typos into `422` errors.
+- Nested models validate recursively; error `loc` values show the nesting path, e.g. `["body", "items", 0, "price"]`.
+- `model_dump()` → dict (Python objects preserved, e.g. `datetime`); `model_dump(mode="json")` → JSON-compatible primitives; `model_dump_json()` → JSON string.
+- `model_validate(obj)` → model from a dict; `model_validate_json(text)` → model from a JSON string.
+- `model_copy(update={...})` returns a copy, but note that it does not run validation on the update.
+
+Field constraints (`gt`, `ge`, `lt`, `le`, `min_length`, `max_length`, `pattern`, `multiple_of`) and documentation (`title`, `description`, `examples`) are declared with `Field`:
+
+```python
+from pydantic import BaseModel, Field
+
+class ItemCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100, description="Display name")
+    price_cents: int = Field(gt=0, description="Price in cents")
+    sku: str = Field(pattern=r"^[A-Z0-9-]{3,20}$")
+```
+
+Custom validation:
+
+```python
+from pydantic import BaseModel, field_validator, model_validator
+
+class Window(BaseModel):
+    start: int
+    end: int
+
+    @field_validator("start", "end")
+    @classmethod
+    def non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("must be non-negative")
+        return value
+
+    @model_validator(mode="after")
+    def check_order(self) -> "Window":
+        if self.start >= self.end:
+            raise ValueError("start must be before end")
+        return self
+```
+
+Configuration options live in `model_config`:
+
+```python
+from pydantic import BaseModel, ConfigDict
+
+class StrictUser(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: str
+```
+
+Input and output models should usually be separate. `UserCreate` validates input; `User` documents the response without fields the client must not see (password hashes, internal flags). FastAPI's `response_model` filters to exactly the declared fields — a security boundary, not just documentation.
 
 ---
 
@@ -1359,6 +1014,62 @@ Answer:
 
 ---
 
+## 5.5 Request bodies, responses, and serialization
+
+A Pydantic model parameter is read from the JSON body:
+
+```python
+from fastapi import FastAPI, status
+
+app = FastAPI()
+
+class ItemCreate(BaseModel):
+    name: str
+    price_cents: int
+
+class Item(BaseModel):
+    id: int
+    name: str
+    price_cents: int
+
+@app.post("/items", status_code=status.HTTP_201_CREATED, response_model=Item)
+def create_item(payload: ItemCreate) -> Item:
+    return Item(id=1, name=payload.name, price_cents=payload.price_cents)
+```
+
+- The body must be valid JSON and match the model, otherwise `422`.
+- `response_model` validates and serializes the result, and strips undeclared fields. A route cannot accidentally leak `password_hash` if `User` does not include it.
+- FastAPI also accepts the return annotation as the response model (`-> Item`), so `response_model` can be omitted when they agree.
+- `response_model_exclude_none=True` removes `None` fields from output; `response_model_exclude_unset=True` omits fields the model never received.
+- `list[Item]` is a valid response model.
+- `status_code=204` means no content; return `None` and set `response_model=None`. `201` is correct for resource creation.
+- To set response headers or status dynamically, declare `response: Response` and mutate it:
+
+```python
+from fastapi import Response
+
+@app.post("/items")
+def create_item(payload: ItemCreate, response: Response) -> Item:
+    response.headers["X-Request-ID"] = "abc"
+    response.status_code = status.HTTP_201_CREATED
+    ...
+```
+
+- Multiple body parameters become keys of one JSON object; wrap a single model with `Body(embed=True)` if the client sends `{"item": {...}}`:
+
+```python
+from fastapi import Body
+
+@app.post("/orders")
+def create_order(item: Annotated[ItemCreate, Body(embed=True)]) -> dict[str, str]:
+    return {"status": "created"}
+```
+
+- `JSONResponse` and `RedirectResponse` bypass response-model serialization; use them deliberately (custom error formats, redirects).
+- Serialization of `datetime`, `date`, `UUID`, and enums is automatic when using `model_dump(mode="json")` or response models.
+
+---
+
 ## Group E — Request bodies, responses, and serialization
 
 **E1.** Implement `POST /books` with a `BookCreate` body model and a `Book` response model. Answer:
@@ -1548,6 +1259,60 @@ A client sends `{"title": "Dune Messiah"}` to a book whose `price_cents` is 1999
 3. Does it affect `model_dump()` in Python mode?
 4. Why should the serialized format be part of the API contract and documented?
 
+## 5.6 Error handling
+
+Raise `HTTPException` for expected HTTP failures:
+
+```python
+from fastapi import HTTPException, status
+
+def get_item_or_404(item_id: int) -> Item:
+    item = find_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    return item
+```
+
+- `detail` may be a string or a JSON-serializable structure. FastAPI returns `{"detail": ...}`.
+- Pass `headers={"WWW-Authenticate": "Bearer"}` for `401` responses.
+- Validation failures are handled by FastAPI as `422` with the standard error list. You can customize the handler for `RequestValidationError` if the API needs a different error envelope.
+
+Domain exceptions should not be HTTP-aware. Define a taxonomy and translate at the HTTP boundary:
+
+```python
+class UpstreamError(Exception):
+    """The external service failed in a non-retryable way."""
+
+class UpstreamTimeout(Exception):
+    """The external service did not respond in time."""
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(UpstreamError)
+def handle_upstream(request: Request, exc: UpstreamError) -> JSONResponse:
+    logger.warning("upstream failure: %s", exc)
+    return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY,
+                        content={"detail": "upstream service failed"})
+
+@app.exception_handler(UpstreamTimeout)
+def handle_timeout(request: Request, exc: UpstreamTimeout) -> JSONResponse:
+    logger.warning("upstream timeout: %s", exc)
+    return JSONResponse(status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                        content={"detail": "upstream timed out"})
+```
+
+Rules:
+
+- Register handlers with `@app.exception_handler(...)` or `app.add_exception_handler(...)`. The handler must return a `Response`.
+- Handlers are selected by exception type; subclasses match parent handlers unless a more specific handler exists.
+- Never return raw exception text, upstream bodies, headers, or stack traces to clients. Log details server-side; return a stable, generic message.
+- Unhandled exceptions become `500`. In `TestClient`, they re-raise by default (useful for debugging); instantiate `TestClient(app, raise_server_exceptions=False)` to assert a 500 response.
+- `HTTPException` subclasses exception handling; do not wrap it in a broad `except Exception` that turns it into `500`.
+- Consistent error envelopes help clients: for example `{"error": {"code": "not_found", "message": "..."}}`. If you change the format, do it with a global handler, not route by route.
+
+---
+
 ## Group F — Error handling
 
 **F1.** Implement `GET /books/{book_id}` so a missing book raises `HTTPException` with status `404` and the message `"Book not found"`. Answer:
@@ -1735,6 +1500,79 @@ Answer:
 
 ---
 
+## 5.7 Dependencies and configuration
+
+FastAPI's dependency injection supplies shared logic and objects to handlers. A dependency is any callable; declare it with `Depends`.
+
+```python
+from functools import lru_cache
+from typing import Annotated
+from fastapi import Depends, FastAPI
+
+@lru_cache
+def get_settings() -> Settings:
+    return load_settings(dict(os.environ))       # Chapter 3
+
+SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+@app.get("/config-check")
+def config_check(settings: SettingsDep) -> dict[str, str]:
+    return {"base_url": settings.base_url}
+```
+
+- `@lru_cache` builds settings once per process; without it, `get_settings` runs per request. Cache expensive immutable objects, not request-specific state.
+- FastAPI caches a dependency's result within a single request by default; different requests call it again (unless it has its own cache).
+- Dependencies can depend on other dependencies, read headers, enforce auth, and raise `HTTPException`.
+- A `yield` dependency provides setup and cleanup:
+
+```python
+def get_client(request: Request) -> Iterator[httpx.Client]:
+    client = httpx.Client(base_url=request.app.state.base_url, timeout=10.0)
+    try:
+        yield client
+    finally:
+        client.close()
+
+ClientDep = Annotated[httpx.Client, Depends(get_client)]
+```
+
+Code after `yield` runs after the response is sent, and runs even when the handler raises. This is the place for closing connections and releasing locks.
+
+- Prefer a single long-lived client created at application startup, stored on `app.state`, and yielded per request without creating a new one:
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.client = httpx.Client(base_url=settings.base_url, timeout=10.0)
+    yield
+    app.state.client.close()
+
+app = FastAPI(lifespan=lifespan)
+
+def get_client(request: Request) -> httpx.Client:
+    return request.app.state.client
+```
+
+The `async`/`asynccontextmanager` syntax is Chapter 6 material; treat it as the standard startup template for now. The dependency is what handlers and tests interact with.
+
+- Dependency overrides are the testing seam:
+
+```python
+app.dependency_overrides[get_settings] = lambda: test_settings
+app.dependency_overrides[get_client] = lambda: fake_client
+```
+
+Clear overrides after each test to avoid leakage.
+
+- Dependencies can be applied at router or app level: `APIRouter(dependencies=[Depends(verify_token)])`, `FastAPI(dependencies=[...])`. Use this for cross-cutting auth, not for business logic.
+- Class-based dependencies (an object with `__call__`) are useful when a dependency needs state; a closure or plain function is usually simpler.
+- Keep configuration out of route bodies: inject settings, clients, and services. Route handlers should read like a short orchestration script.
+
+---
+
 ## Group G — Dependencies and configuration
 
 **G1.** Write a dependency `get_pagination` that returns a small object with `limit` and `offset`, both validated. Inject it into `GET /books` and `GET /authors`. Answer:
@@ -1902,6 +1740,53 @@ Answer:
 3. Why should production configuration not rely on defaults for secrets?
 4. How do you document required variables?
 5. What happens when an environment variable has the wrong type, and where should that error surface?
+
+---
+
+## 5.8 Calling external services
+
+Keep HTTP calls in a service/client layer, not inside route bodies. The layer should be testable without FastAPI and should not raise `HTTPException`.
+
+```python
+import httpx
+
+class WeatherService:
+    def __init__(self, client: httpx.Client):
+        self._client = client
+
+    def current(self, city: str) -> dict[str, object]:
+        try:
+            response = self._client.get("/weather", params={"city": city})
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise UpstreamTimeout(f"weather timeout for {city}") from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code >= 500:
+                raise UpstreamError(f"weather status {exc.response.status_code}") from exc
+            raise UpstreamBadRequest(f"weather rejected city {city}") from exc
+        except httpx.RequestError as exc:
+            raise UpstreamError("weather connection failed") from exc
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise UpstreamError("weather returned invalid JSON") from exc
+```
+
+```python
+@app.get("/weather/{city}")
+def weather(city: str, settings: SettingsDep, client: ClientDep) -> dict[str, object]:
+    service = WeatherService(client)
+    return service.current(city)
+```
+
+- Registration of the service as a dependency is optional; constructing it per request with shared collaborators is cheap.
+- Map upstream failures to meaningful local statuses: timeout → `504`, upstream 5xx/invalid body → `502`, upstream 4xx caused by caller input → `400` or `404` depending on meaning. Do not blindly pass a `500` through.
+- Always set timeouts. Retry only transient failures (timeouts, connection errors, 429, 5xx) with a small bound; never retry 4xx. The route-level outcome after exhausting retries is typically `503` or `504`.
+- Never forward upstream error bodies or headers to clients; they may contain internal details or secrets. Log a sanitized summary.
+- Reuse the client (Chapter 3). Creating one per request loses connection pooling.
+- Bound response sizes if you parse arbitrary upstream JSON; do not assume the shape. Validate with a Pydantic model when the response feeds business logic.
+- Idempotency: retrying a `POST` can duplicate effects. Prefer `PUT`/`DELETE` when designing retryable endpoints, or require an idempotency key (advanced; Chapter 8).
 
 ---
 
@@ -2102,6 +1987,88 @@ Answer:
 
 ---
 
+## 5.9 Structuring the application
+
+A scalable layout:
+
+```text
+app/
+├── main.py            # FastAPI(), lifespan, include_router, exception handlers
+├── config.py          # Settings + load_settings (Chapter 3)
+├── dependencies.py    # get_settings, get_client, auth dependencies
+├── schemas.py         # Pydantic request/response models
+├── services.py        # business logic + upstream calls; no FastAPI imports
+└── routers/
+    ├── __init__.py
+    ├── items.py
+    └── weather.py
+```
+
+Principles:
+
+- Route handlers parse/validate, call services, and translate results or domain exceptions into HTTP responses. No database or HTTP client code inline.
+- `services.py` contains the logic you can unit test without starting the app. It raises domain exceptions, not `HTTPException`.
+- `schemas.py` defines input and output models; keep secrets out of output models.
+- `dependencies.py` wires configuration and clients; this is the seam for test overrides.
+- `main.py` assembles routers, lifespan, and handlers. Keep it boring.
+- Do not let Pydantic models leak into domain logic as mutable state holders; converting to dataclasses/domain objects is optional but useful as complexity grows.
+- One router per resource, with `prefix` and `tags`; avoid a 500-line `main.py`.
+
+---
+
+## 5.10 Testing the API
+
+`TestClient` (built on `httpx`) calls the app in-process, with no network and no server process:
+
+```python
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+def test_health():
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+def test_missing_item():
+    response = client.get("/items/999")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Item not found"}
+```
+
+Testing validation failures:
+
+```python
+def test_invalid_user_id():
+    response = client.get("/users/abc")
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail[0]["loc"] == ["path", "user_id"]
+    assert detail[0]["type"] == "int_parsing"
+
+def test_body_validation():
+    response = client.post("/items", json={"name": "", "price_cents": -5})
+    assert response.status_code == 422
+    locations = {tuple(err["loc"]) for err in response.json()["detail"]}
+    assert ("body", "name") in locations
+    assert ("body", "price_cents") in locations
+```
+
+Rules and tools:
+
+- Use fixtures (Chapter 4) to build a `TestClient` and to install/clear `app.dependency_overrides` around each test.
+- Override dependencies instead of patching internals: `app.dependency_overrides[get_client] = lambda: fake_client`. A `yield` fixture clears the dict afterward.
+- Test the full contract: status code, response body shape, required headers, and absence of sensitive fields.
+- Test error paths: missing resource, invalid path/query/body, conflict, upstream failure, timeout, malformed upstream JSON.
+- Use a real `httpx.MockTransport` at the service layer to simulate upstream behavior without network (Chapters 3–4).
+- For unhandled exceptions, `TestClient(app, raise_server_exceptions=False)` lets you assert `500`.
+- Test services directly (plain unit tests) for mapping logic, and routes for wiring. Do not duplicate every service test at the HTTP layer.
+- The OpenAPI schema is testable: `client.get("/openapi.json")` should be `200` and include expected paths and required fields.
+- Async app tests via `httpx.AsyncClient(transport=ASGITransport(app=app))` arrive in Chapter 6; `TestClient` is sufficient for synchronous handlers.
+
+---
+
 ## Group I — Testing the API
 
 **I1.** Write a `conftest.py` fixture that yields a `TestClient` for the app. Answer:
@@ -2273,6 +2240,39 @@ Answer:
 5. What would you change if the API needed to support two envelope versions?
 
 **I22.** Decide which of these deserve service-level tests and which deserve route-level tests: duplicate ISBN detection, JSON body parsing, auth dependency, upstream retry, `response_model` filtering, and pagination query validation. Justify each choice and avoid duplicating the same assertion at both levels.
+
+---
+
+## 5.11 Common mistakes and conventions
+
+Mistakes to avoid:
+
+1. Returning ORM objects or dicts with extra fields instead of response models (leaks secrets).
+2. Missing `response_model`/return annotation, so output shape drifts silently.
+3. Catching all exceptions and converting them to `500`, including `HTTPException`.
+4. Exposing upstream error bodies, headers, stack traces, or tokens to clients.
+5. Forgetting timeouts on external calls.
+6. Creating an `httpx.Client` per request; not closing clients.
+7. Putting business logic and HTTP calls directly in route functions.
+8. Declaring `async def` handlers that call blocking I/O.
+9. Using mutable defaults in Pydantic models instead of `default_factory`.
+10. Relying on validation-error message text instead of `loc`/`type` in tests.
+11. Tests that hit real APIs or depend on environment variables without overriding dependencies.
+12. Letting dependency overrides leak across tests.
+13. Retrying non-idempotent `POST` requests or retrying `4xx` errors.
+14. Using `422` for business-rule failures that belong to `400`/`409`.
+15. Adding `response_model` fields that include internal identifiers or secrets.
+
+Conventions to adopt:
+
+- Separate `ItemCreate` (input) from `Item` (output) models.
+- `response_model` or return annotations on every route.
+- `status_code=201` for creation, `204` for successful empty responses.
+- Dependency injection for settings, clients, and auth; override them in tests.
+- Domain exceptions in services, mapped to `HTTPException`/handlers at the boundary.
+- One router per resource; thin handlers, tested services.
+- `TestClient` fixtures plus `dependency_overrides`; `MockTransport` for upstream behavior.
+- Structured logs with request IDs; no secrets, no raw upstream bodies.
 
 ---
 
@@ -2491,4 +2491,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Test the API contract with `TestClient`: success, validation, auth, conflicts, upstream failures, secret leakage, and OpenAPI output.
 - Translate Express/NestJS/Zod patterns into FastAPI equivalents and recognize where runtime validation differs from TypeScript types.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 6.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 6](../chapter-6/async-concurrency.md).

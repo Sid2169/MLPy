@@ -93,6 +93,52 @@ python -m pip install -e ".[dev]"   # with the dev extras
 
 Editable installs (`-e`) link the project into the environment so source edits take effect without reinstalling. `uv` is a fast drop-in alternative with the same model (`uv venv`, `uv pip install`, `uv add httpx`); the concepts are identical, only the commands differ. `pip` and the virtual environment remain the baseline you must be able to explain.
 
+# Exercises
+
+Work each exercise before running commands or code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
+
+## Group A — Virtual environments and dependencies
+
+**A1.** Put these steps in the correct order and write the exact commands: create the environment, activate it, install the pinned dependencies from `requirements.txt`.
+
+**A2.** Explain why the command `pip install httpx` can install the package into the wrong interpreter, and write the safe form of the command.
+
+**A3.** A developer ran `pip install httpx` successfully, but the script still fails with:
+
+```text
+ModuleNotFoundError: No module named 'httpx'
+```
+
+List two likely causes and the two commands that would confirm the active interpreter and the package location.
+
+**A4.** Write the activation command for Linux/macOS and for Windows PowerShell, the command to confirm which Python is active, and the command to leave the environment.
+
+**A5.** State which command produces a reproducible snapshot of an application's full dependency graph, and when a hand-curated manifest is preferable.
+
+**A6.** For each requirement line, state the allowed versions: `httpx==0.27.2`, `httpx~=0.27.2`, `httpx>=0.27`. Then write an exact pin for version `1.4.2` and a compatible-release pin for the same version.
+
+**A7.** Explain what `python -m pip install -e .` does and describe one workflow where it is clearly better than `pip install .`.
+
+**A8.** Classify each item as "commit" or "git-ignore" and justify in one line each: `.venv/`, `requirements.txt`, `.env`, `.env.example`, `__pycache__/`, `pyproject.toml`, `data/output.json`.
+
+**A9.** Write a minimal `pyproject.toml` for an application named `importer` that requires Python 3.11+, depends on `httpx` version 0.27.x, and has a `dev` extra with `pytest`.
+
+**A10.** Write the commands to list outdated packages and to upgrade only `httpx`. Explain in two sentences why upgrading all packages blindly before a release is risky.
+
+**A11.** A team member reports that tests pass locally but fail in CI with different `httpx` behavior. Explain the most likely cause and the two-line fix.
+
+**A12.** Explain the difference in upper bounds between `httpx~=0.27.2` and `httpx~=0.27`, and state which one allows `0.28.0`.
+
+**A13.** Write the `uv` equivalents of `python -m venv .venv`, `python -m pip install -r requirements.txt`, and `python -m pip install httpx`.
+
+**A14.** Explain why committing `.venv/` is a bad idea (give three distinct reasons).
+
+**A15.** Translate these `package.json` concepts to their Python equivalents: `dependencies`, `devDependencies`, and `scripts`.
+
+**A16.** A script works when the shell is at the project root but fails with `FileNotFoundError` from any other directory. Name the class of bug and the one-line approach that fixes it permanently.
+
+**A17.** Write the sequence of commands a new contributor must run after cloning a repository that uses `.venv`, `requirements.txt`, and a `.env.example`, ending with running `python -m app.main`.
+
 ## 3.2 Project structure, configuration, environment variables, and secrets
 
 A layout that scales from a script to a service:
@@ -198,469 +244,6 @@ Key ideas:
 
 Return an immutable settings object (a frozen dataclass works well) and pass it to the functions that need it. Avoid importing a module-level `settings = load_settings(os.environ)` everywhere, because that runs at import time and makes tests depend on the ambient environment.
 
-## 3.3 Paths and files with `pathlib`
-
-`pathlib.Path` replaces most `os.path` string juggling. Prefer it in new code.
-
-```python
-from pathlib import Path
-
-data_dir = Path("data")
-file_path = data_dir / "raw" / "users.json"   # the / operator joins paths
-print(file_path)                # data/raw/users.json
-print(str(file_path))           # convert to string for libraries that need one
-
-p = Path("/var/log/app/server.log")
-p.name        # 'server.log'
-p.stem        # 'server'
-p.suffix      # '.log'
-p.parent      # Path('/var/log/app')
-p.with_suffix(".json")   # Path('/var/log/app/server.json')
-```
-
-### Reading and writing text
-
-```python
-text = Path("notes.txt").read_text(encoding="utf-8")
-Path("out").mkdir(parents=True, exist_ok=True)
-Path("out/notes.txt").write_text(text.upper(), encoding="utf-8")
-```
-
-- Always pass `encoding="utf-8"`. The default is the platform locale, which differs across machines and is a classic source of mojibake.
-- `write_text` overwrites by default. Modes still matter when using `open`: `"w"` truncates, `"a"` appends, `"r"` reads.
-- `mkdir(parents=True, exist_ok=True)` creates intermediate directories and does not fail if the directory already exists. Without `parents=True`, a missing intermediate raises `FileNotFoundError`.
-- Reading a missing file raises `FileNotFoundError`; check with `.exists()` only when the behavior is genuinely optional, otherwise let the error surface with context added at the boundary.
-
-For line-by-line processing of large files, iterate instead of reading it all:
-
-```python
-with Path("events.log").open(encoding="utf-8") as f:
-    for line in f:
-        process(line.rstrip("\n"))
-```
-
-### Navigating directories
-
-```python
-root = Path("data")
-for path in root.iterdir():            # all entries, non-recursive
-    print(path)
-
-for path in root.glob("*.json"):       # pattern in this directory
-    print(path)
-
-for path in root.rglob("*.json"):      # recursive
-    print(path)
-
-json_files = sorted(p for p in root.rglob("*.json") if p.is_file())
-```
-
-Sort the results when the output order matters; filesystem order is arbitrary.
-
-### Locating files relative to your code
-
-A relative path like `"data/users.json"` depends on the current working directory. Running the script from another directory breaks it. Anchor paths to the module instead:
-
-```python
-# app/config.py
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-```
-
-`__file__` is the module's path; `.resolve()` makes it absolute and normalizes `..`. This is Python's equivalent of `import.meta.url` in ES modules.
-
-### Binary data and temporary files
-
-- `read_bytes()` / `write_bytes()` handle binary content; text APIs must not be used for images or archives.
-- `tempfile.TemporaryDirectory()` and `tempfile.NamedTemporaryFile()` create scratch space that cleans itself up. Chapter 4 uses them heavily for tests.
-
-## 3.4 JSON and CSV
-
-### JSON
-
-`json` maps between Python objects and text: `dict` ↔ object, `list`/`tuple` ↔ array, `str` ↔ string, `int`/`float` ↔ number, `True`/`False` ↔ `true`/`false`, `None` ↔ `null`.
-
-```python
-import json
-
-payload = {"id": 1, "name": "Ada", "active": True, "score": None}
-text = json.dumps(payload)                  # '{"id": 1, "name": "Ada", ...}'
-text = json.dumps(payload, indent=2, ensure_ascii=False)  # file-friendly
-data = json.loads(text)                     # back to a dict
-```
-
-File helpers:
-
-```python
-from pathlib import Path
-import json
-
-def save_json(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-def load_json(path: Path):
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
-```
-
-Details and pitfalls:
-
-- `json.dumps(x, indent=2)` is for humans (configs, fixtures, debugging). Compact output is for transport and storage. Trailing newline makes file diffs cleaner.
-- `ensure_ascii=False` writes real Unicode characters instead of `\uXXXX` escapes.
-- Invalid JSON raises `json.JSONDecodeError` (a subclass of `ValueError`): trailing commas, single quotes, comments, and unquoted keys are all invalid, unlike JavaScript object literals.
-- Not every object is serializable. `datetime`, `Path`, `set`, and custom classes raise `TypeError` unless you convert them yourself (`dt.isoformat()`, `str(p)`, `sorted(s)`) or pass `default=str` (which can silently produce unhelpful output — prefer explicit conversion).
-- Tuples serialize as arrays and come back as lists.
-- `json.load(f)` reads from a file object; `json.loads(s)` reads from a string. The trailing `s` means "string."
-- JSON key order is preserved on load because modern Python dicts preserve insertion order, but do not depend on it for correctness.
-- NDJSON (one JSON object per line) is the standard for streams and logs: read line by line, `json.loads` each non-empty line.
-
-Accessing nested payloads safely:
-
-```python
-name = data.get("user", {}).get("name") or "unknown"
-```
-
-This does not validate; it degrades gracefully. Validation is Chapter 5.
-
-### CSV
-
-CSV values are always strings once read; every number needs conversion. The `csv` module handles quoting, delimiters, and embedded newlines that naive `split(",")` breaks on.
-
-```python
-import csv
-
-with Path("users.csv").open(encoding="utf-8", newline="") as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        print(row["name"], int(row["age"]))
-```
-
-Writing:
-
-```python
-rows = [{"name": "Ada", "age": 36}, {"name": "Grace", "age": 45}]
-
-with Path("out.csv").open("w", encoding="utf-8", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=["name", "age"])
-    writer.writeheader()
-    writer.writerows(rows)
-```
-
-Rules:
-
-- Open CSV files with `newline=""` so the module controls line endings; otherwise blank lines appear on Windows.
-- `DictReader` uses the first row as keys. Values are strings; convert with `int`/`float`/custom parsers and expect `ValueError` on bad data.
-- DictWriter writes fields in `fieldnames` order; missing keys error unless you pass `restval`, and extra keys error unless you pass `extrasaction="ignore"`.
-- `csv.reader` yields lists; `DictReader` yields dicts. Dicts are usually clearer.
-- Quoting is automatic: a field containing commas, quotes, or newlines is wrapped and quotes are doubled. Do not hand-roll CSV with `split`/`join`.
-- For Excel-produced files, `encoding="utf-8-sig"` strips the BOM.
-- For positional columns, empty cells become `""` (or `None` with `restval`); do not confuse `""` with missing.
-
-Pandas (Chapter 7) is the right tool for large, numeric, multi-join datasets. The `csv` module is right for small, streaming, dependency-free processing.
-
-## 3.5 Logging
-
-`logging` is the standard diagnostic channel. `print` writes to stdout for interactive use; logging adds levels, timestamps, module names, and destinations, and can be configured without touching call sites.
-
-```python
-# app/client.py
-import logging
-
-logger = logging.getLogger(__name__)   # one logger per module, named after it
-
-def fetch(url):
-    logger.info("fetching %s", url)     # lazy % formatting
-    ...
-    logger.warning("slow response: %.2fs", elapsed)
-```
-
-```python
-# app/main.py  (entry point only)
-import logging
-
-def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
-    ...
-```
-
-Rules and details:
-
-- Use `logging.getLogger(__name__)` at module level. The name shows which module logged the message; libraries must never configure the root logger themselves.
-- Call `logging.basicConfig()` exactly once, in the application entry point. Calling it again without `force=True` does nothing because handlers already exist. Library modules must not call it at all, or they hijack the host application's logging.
-- Levels, in increasing severity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. The root logger defaults to `WARNING`, which is why `logger.info` seems to "do nothing" before configuration.
-- Prefer `logger.info("fetched %s in %.1fs", url, seconds)` over f-strings. The parameters are formatted only if the record is emitted, and the message stays a fixed template. In `logger.debug`, f-strings eagerly build expensive strings even when debug is off.
-- Inside an `except` block, `logger.exception("failed to fetch %s", url)` logs the message plus traceback (`exc_info=True`). Use it instead of `logger.error` when you want the stack.
-- Log enough context to diagnose without logging secrets: no API keys, tokens, passwords, or full headers. Redact before logging.
-- Do not swallow exceptions with `except ...: pass`; log them or re-raise (Chapter 2).
-- Structured logging (JSON lines) is standard for services: emit fields like `event`, `request_id`, `latency_ms` so log systems can query them. You can approximate it with a JSON formatter; full treatment is Chapter 8.
-- Configuration can come from the environment: parse `LOG_LEVEL` with a safe fallback (`getattr(logging, name.upper(), logging.INFO)` after validating).
-- Handlers determine destination (console, file, syslog); formatters determine the line format. `logging.basicConfig(handlers=[...])` or `dictConfig` wires them. Keep it simple until you need files and rotation.
-
-## 3.6 Debugging and tracebacks
-
-A traceback reads from the bottom up:
-
-```text
-Traceback (most recent call last):
-  File "app/main.py", line 12, in <module>
-    main()
-  File "app/main.py", line 8, in main
-    print(load(path)["items"])
-          ~~~~^^^^^^^^^^^^^^^^
-KeyError: 'items'
-```
-
-- The last line is the exception type and message: `KeyError: 'items'`.
-- The line above it points at the failing expression, often with `^^^` markers.
-- Frames are ordered oldest call first; every frame belonging to your code is a candidate for scrutiny. Third-party frames in the middle are usually victims, not causes.
-- Chained exceptions show `The above exception was the direct cause of the following exception` (from `raise ... from e`) or `During handling of the above exception, another exception occurred` (implicit). Read the first chain link when the bottom error is a generic wrapper.
-
-The workflow:
-
-1. Read the bottom line. Identify the exception type and message.
-2. Find the topmost frame inside your own code.
-3. Check the values on that line (types, `None`, key presence) — most bugs are `None` where an object was expected or a missing key.
-4. Reproduce minimally: copy the failing call into a scratch file with literal inputs.
-5. Fix, then add a test (Chapter 4) so it cannot silently return.
-
-Tools:
-
-- `python -i script.py` drops into an interactive session after a crash with traceback state available.
-- `breakpoint()` (Python 3.7+) starts the built-in debugger `pdb` at that line: `p` prints, `n` steps over, `s` steps into, `c` continues, `q` quits.
-- `python -m pdb script.py` debugs from the first line.
-- `logging` beats `print` for anything beyond one-off exploration because it can be left in place and configured at runtime.
-- `assert` documents invariants while developing; it is removed under `python -O` and is not input validation (Chapter 2).
-
-Error-type quick reference:
-
-| Exception | Typical cause |
-| --- | --- |
-| `ModuleNotFoundError` | package not installed in the *active* environment, or wrong import path |
-| `ImportError` | name does not exist in an existing module (often circular import) |
-| `AttributeError` | object is not the type you think, frequently `None` |
-| `TypeError: NoneType is not subscriptable` | a function returned `None` where a dict/list was expected |
-| `KeyError` | dict key missing; use `.get` or fix upstream validation |
-| `FileNotFoundError` | wrong working directory or typo; anchor with `Path(__file__)` |
-| `json.JSONDecodeError` | malformed JSON (trailing comma, single quotes) |
-| `ConnectionError`/`Timeout` | network, DNS, firewall, or missing timeout handling |
-
-## 3.7 HTTP requests with `httpx`
-
-`httpx` is a modern synchronous-and-asynchronous HTTP client. Chapter 6 uses its async API; here is the synchronous side, which is all you need for scripts and many services.
-
-```python
-import httpx
-
-response = httpx.get("https://api.example.com/users/1", timeout=10.0)
-print(response.status_code)          # 200
-data = response.json()               # parses JSON body
-print(response.headers["content-type"])
-```
-
-Always check status and set an explicit timeout:
-
-```python
-def fetch_user(user_id: int) -> dict:
-    response = httpx.get(f"https://api.example.com/users/{user_id}", timeout=10.0)
-    response.raise_for_status()      # raises httpx.HTTPStatusError for 4xx/5xx
-    return response.json()
-```
-
-Rules:
-
-- Never leave timeouts implicit. `httpx` defaults to 5 seconds per phase (unlike `requests`, which defaults to no timeout), but production code should state its budget: `timeout=httpx.Timeout(10.0, connect=5.0)` or the simple `timeout=10.0`.
-- `response.raise_for_status()` is the shortest path to "fail on HTTP errors." Without it, a 500 response body flows onward as if it were valid data.
-- `response.json()` raises `json.JSONDecodeError` on invalid JSON. Do not assume the body is JSON just because the request succeeded.
-- `response.text` decodes using the response charset; `response.content` is raw bytes.
-
-### Reuse connections with a Client
-
-```python
-with httpx.Client(base_url="https://api.example.com", timeout=10.0) as client:
-    users = client.get("/users").raise_for_status().json()
-    user = client.get(f"/users/{users[0]['id']}").raise_for_status().json()
-```
-
-- A `Client` pools connections and carries shared configuration (`base_url`, headers, auth, timeouts). Creating a client per request forfeits pooling and is the most common performance mistake.
-- Always close it with `with` or `client.close()`; Chapter 6 makes the async equivalent explicit.
-- Pass query parameters with `params=` and JSON bodies with `json=` (which sets `content-type: application/json` and serializes the object):
-
-```python
-client.post("/users", json={"name": "Ada"}, params={"notify": "true"})
-```
-
-### Errors and retries
-
-```python
-import httpx
-
-try:
-    response = client.get("/users/1")
-    response.raise_for_status()
-except httpx.HTTPStatusError as e:
-    if e.response.status_code < 500:
-        raise                # 4xx: not retryable, fix the request
-    raise
-except httpx.TimeoutException:
-    ...                      # connect/read timeout
-except httpx.RequestError:
-    ...                      # DNS, connection refused, TLS, and other transport failures
-```
-
-Hierarchy: `httpx.HTTPError` is the base; `HTTPStatusError` covers bad statuses; `RequestError` (with `TimeoutException`, `ConnectError`, ...) covers transport problems. Catch the narrowest type that matches your policy.
-
-Retry only transient failures (timeouts, connection resets, 429, 5xx), with a small bounded number of attempts and a delay. Never retry a 400, 401, or 404. Chapter 8 builds the full retry policy; the pattern is a `for` loop with `break`/`continue` and a final raise.
-
-Security hygiene: never log the `Authorization` header or full request/response bodies by default; redact secrets when logging headers.
-
-## 3.8 Command-line scripts and configuration validation
-
-`argparse` is the standard-library CLI framework. Even a 20-line script benefits from named, typed arguments.
-
-```python
-import argparse
-import sys
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Import records from an API.")
-    parser.add_argument("input", help="path to the input JSON file")
-    parser.add_argument("--limit", type=int, default=100, help="max records (default: 100)")
-    parser.add_argument("--output", default="out.json", help="output path")
-    parser.add_argument("--verbose", action="store_true", help="enable debug logging")
-    return parser
-
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    ...
-    return 0
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
-
-Conventions that make scripts testable and scriptable:
-
-- `main(argv=None)` takes arguments explicitly; `parse_args(None)` reads `sys.argv`. Tests call `main(["--limit", "5", "in.json"])` without spawning a process.
-- Return an exit code (`0` success, `1` expected failure) and let the `__main__` guard call `sys.exit`. This makes shell automation reliable.
-- `argparse` handles `--help`, `type=int` conversion, and missing required arguments for you. A bad value exits with code 2 and prints usage.
-- Positional arguments for the primary inputs; options with `--` for everything else. Give every option a default or make it `required=True`.
-- Precedence when combining CLI flags, environment variables, and defaults: explicit CLI flag > environment variable > built-in default. Implement one merge function with that order, at startup.
-- Validate the assembled configuration in one place before doing any work; print all problems, use clear messages, and exit non-zero. Do not discover a bad URL after fetching half a dataset.
-- `--verbose` conventionally lowers the log level; wire it to `logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)`.
-- Write help text as if it were documentation: it is the first thing users run.
-
-A typical main flow:
-
-```python
-def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(levelname)s %(name)s %(message)s")
-    logger = logging.getLogger("app")
-
-    try:
-        settings = load_settings(dict(os.environ))
-    except ConfigError as e:
-        logger.error("configuration error: %s", e)
-        return 1
-
-    try:
-        records = load_input(Path(args.input))
-    except FileNotFoundError:
-        logger.error("input file not found: %s", args.input)
-        return 1
-
-    save_json(Path(args.output), records)
-    logger.info("wrote %d records to %s", len(records), args.output)
-    return 0
-```
-
-## 3.9 Common mistakes and idioms
-
-Mistakes to avoid:
-
-1. Running bare `pip install` or `python` from outside the virtual environment.
-2. Committing `.venv/`, `.env`, or absolute paths.
-3. `bool(os.getenv("DEBUG"))` — every non-empty string is truthy.
-4. Reading configuration all over the codebase instead of once at startup into a settings object.
-5. `json.dumps` on `datetime`/`set` without conversion; expecting JavaScript object literals to parse.
-6. Hand-parsing CSV with `split(",")`; forgetting `newline=""`.
-7. `open()` / `write_text` without `encoding="utf-8"`.
-8. Relative paths that depend on the working directory instead of `Path(__file__)`.
-9. `print` for diagnostics in libraries; `basicConfig` in libraries; f-strings in `logger.debug`.
-10. Logging secrets or full headers.
-11. HTTP calls without timeouts or without `raise_for_status()`.
-12. Creating a new `httpx.Client` per request inside a loop.
-13. Retrying permanent failures (4xx) or retrying forever.
-14. CLI scripts with no exit codes, or `main()` that reads `sys.argv` directly, making tests spawn processes.
-15. Validating configuration lazily, producing deep, confusing errors.
-
-Idioms to adopt:
-
-- `python -m venv .venv` + `python -m pip install -e ".[dev]"` for a reproducible baseline.
-- `python -m pip freeze > requirements.txt` to snapshot an environment that must run elsewhere.
-- `Path(__file__).resolve().parent` for code-anchored paths.
-- `Path.mkdir(parents=True, exist_ok=True)` before writes.
-- `json.dumps(data, indent=2, ensure_ascii=False) + "\n"` for committed JSON.
-- `csv.DictReader`/`DictWriter` with `newline=""`.
-- `logger = logging.getLogger(__name__)` per module; configure logging once in `main`.
-- `response.raise_for_status()` immediately after every client call.
-- `main(argv=None) -> int` plus `sys.exit(main())` for every script.
-
----
-
-# Exercises
-
-Work each exercise before running commands or code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, reconcile, then rewrite from memory.
-
-## Group A — Virtual environments and dependencies
-
-**A1.** Put these steps in the correct order and write the exact commands: create the environment, activate it, install the pinned dependencies from `requirements.txt`.
-
-**A2.** Explain why the command `pip install httpx` can install the package into the wrong interpreter, and write the safe form of the command.
-
-**A3.** A developer ran `pip install httpx` successfully, but the script still fails with:
-
-```text
-ModuleNotFoundError: No module named 'httpx'
-```
-
-List two likely causes and the two commands that would confirm the active interpreter and the package location.
-
-**A4.** Write the activation command for Linux/macOS and for Windows PowerShell, the command to confirm which Python is active, and the command to leave the environment.
-
-**A5.** State which command produces a reproducible snapshot of an application's full dependency graph, and when a hand-curated manifest is preferable.
-
-**A6.** For each requirement line, state the allowed versions: `httpx==0.27.2`, `httpx~=0.27.2`, `httpx>=0.27`. Then write an exact pin for version `1.4.2` and a compatible-release pin for the same version.
-
-**A7.** Explain what `python -m pip install -e .` does and describe one workflow where it is clearly better than `pip install .`.
-
-**A8.** Classify each item as "commit" or "git-ignore" and justify in one line each: `.venv/`, `requirements.txt`, `.env`, `.env.example`, `__pycache__/`, `pyproject.toml`, `data/output.json`.
-
-**A9.** Write a minimal `pyproject.toml` for an application named `importer` that requires Python 3.11+, depends on `httpx` version 0.27.x, and has a `dev` extra with `pytest`.
-
-**A10.** Write the commands to list outdated packages and to upgrade only `httpx`. Explain in two sentences why upgrading all packages blindly before a release is risky.
-
-**A11.** A team member reports that tests pass locally but fail in CI with different `httpx` behavior. Explain the most likely cause and the two-line fix.
-
-**A12.** Explain the difference in upper bounds between `httpx~=0.27.2` and `httpx~=0.27`, and state which one allows `0.28.0`.
-
-**A13.** Write the `uv` equivalents of `python -m venv .venv`, `python -m pip install -r requirements.txt`, and `python -m pip install httpx`.
-
-**A14.** Explain why committing `.venv/` is a bad idea (give three distinct reasons).
-
-**A15.** Translate these `package.json` concepts to their Python equivalents: `dependencies`, `devDependencies`, and `scripts`.
-
-**A16.** A script works when the shell is at the project root but fails with `FileNotFoundError` from any other directory. Name the class of bug and the one-line approach that fixes it permanently.
-
-**A17.** Write the sequence of commands a new contributor must run after cloning a repository that uses `.venv`, `requirements.txt`, and a `.env.example`, ending with running `python -m app.main`.
-
 ## Group B — Project structure, configuration, environment variables, and secrets
 
 **B1.** Predict all three printed values (the third raises; name the exception):
@@ -755,6 +338,84 @@ value = os.environ.get("X") or "default"
 **B19.** Write `main()` that loads settings, catches `ConfigError`, logs the message, and returns exit code 1. Show the `__main__` guard.
 
 **B20.** Explain the difference between failing at startup with one clear `ConfigError` and failing later with `TypeError: int() argument must be a string...` inside a request handler. Give one concrete production consequence.
+
+## 3.3 Paths and files with `pathlib`
+
+`pathlib.Path` replaces most `os.path` string juggling. Prefer it in new code.
+
+```python
+from pathlib import Path
+
+data_dir = Path("data")
+file_path = data_dir / "raw" / "users.json"   # the / operator joins paths
+print(file_path)                # data/raw/users.json
+print(str(file_path))           # convert to string for libraries that need one
+
+p = Path("/var/log/app/server.log")
+p.name        # 'server.log'
+p.stem        # 'server'
+p.suffix      # '.log'
+p.parent      # Path('/var/log/app')
+p.with_suffix(".json")   # Path('/var/log/app/server.json')
+```
+
+### Reading and writing text
+
+```python
+text = Path("notes.txt").read_text(encoding="utf-8")
+Path("out").mkdir(parents=True, exist_ok=True)
+Path("out/notes.txt").write_text(text.upper(), encoding="utf-8")
+```
+
+- Always pass `encoding="utf-8"`. The default is the platform locale, which differs across machines and is a classic source of mojibake.
+- `write_text` overwrites by default. Modes still matter when using `open`: `"w"` truncates, `"a"` appends, `"r"` reads.
+- `mkdir(parents=True, exist_ok=True)` creates intermediate directories and does not fail if the directory already exists. Without `parents=True`, a missing intermediate raises `FileNotFoundError`.
+- Reading a missing file raises `FileNotFoundError`; check with `.exists()` only when the behavior is genuinely optional, otherwise let the error surface with context added at the boundary.
+
+For line-by-line processing of large files, iterate instead of reading it all:
+
+```python
+with Path("events.log").open(encoding="utf-8") as f:
+    for line in f:
+        process(line.rstrip("\n"))
+```
+
+### Navigating directories
+
+```python
+root = Path("data")
+for path in root.iterdir():            # all entries, non-recursive
+    print(path)
+
+for path in root.glob("*.json"):       # pattern in this directory
+    print(path)
+
+for path in root.rglob("*.json"):      # recursive
+    print(path)
+
+json_files = sorted(p for p in root.rglob("*.json") if p.is_file())
+```
+
+Sort the results when the output order matters; filesystem order is arbitrary.
+
+### Locating files relative to your code
+
+A relative path like `"data/users.json"` depends on the current working directory. Running the script from another directory breaks it. Anchor paths to the module instead:
+
+```python
+# app/config.py
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+```
+
+`__file__` is the module's path; `.resolve()` makes it absolute and normalizes `..`. This is Python's equivalent of `import.meta.url` in ES modules.
+
+### Binary data and temporary files
+
+- `read_bytes()` / `write_bytes()` handle binary content; text APIs must not be used for images or archives.
+- `tempfile.TemporaryDirectory()` and `tempfile.NamedTemporaryFile()` create scratch space that cleans itself up. Chapter 4 uses them heavily for tests.
 
 ## Group C — Paths and files with `pathlib`
 
@@ -851,6 +512,91 @@ with p.open("a", encoding="utf-8") as f:
 **C21.** Predict the result of `Path("data/../notes.txt").resolve()` given a project root of `/home/dev/project`, and explain what `resolve()` guarantees.
 
 **C22.** Write a function `find_latest(directory, pattern)` returning the most recently modified file matching a glob, or `None` when nothing matches. Use `stat().st_mtime`.
+
+## 3.4 JSON and CSV
+
+### JSON
+
+`json` maps between Python objects and text: `dict` ↔ object, `list`/`tuple` ↔ array, `str` ↔ string, `int`/`float` ↔ number, `True`/`False` ↔ `true`/`false`, `None` ↔ `null`.
+
+```python
+import json
+
+payload = {"id": 1, "name": "Ada", "active": True, "score": None}
+text = json.dumps(payload)                  # '{"id": 1, "name": "Ada", ...}'
+text = json.dumps(payload, indent=2, ensure_ascii=False)  # file-friendly
+data = json.loads(text)                     # back to a dict
+```
+
+File helpers:
+
+```python
+from pathlib import Path
+import json
+
+def save_json(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+def load_json(path: Path):
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
+```
+
+Details and pitfalls:
+
+- `json.dumps(x, indent=2)` is for humans (configs, fixtures, debugging). Compact output is for transport and storage. Trailing newline makes file diffs cleaner.
+- `ensure_ascii=False` writes real Unicode characters instead of `\uXXXX` escapes.
+- Invalid JSON raises `json.JSONDecodeError` (a subclass of `ValueError`): trailing commas, single quotes, comments, and unquoted keys are all invalid, unlike JavaScript object literals.
+- Not every object is serializable. `datetime`, `Path`, `set`, and custom classes raise `TypeError` unless you convert them yourself (`dt.isoformat()`, `str(p)`, `sorted(s)`) or pass `default=str` (which can silently produce unhelpful output — prefer explicit conversion).
+- Tuples serialize as arrays and come back as lists.
+- `json.load(f)` reads from a file object; `json.loads(s)` reads from a string. The trailing `s` means "string."
+- JSON key order is preserved on load because modern Python dicts preserve insertion order, but do not depend on it for correctness.
+- NDJSON (one JSON object per line) is the standard for streams and logs: read line by line, `json.loads` each non-empty line.
+
+Accessing nested payloads safely:
+
+```python
+name = data.get("user", {}).get("name") or "unknown"
+```
+
+This does not validate; it degrades gracefully. Validation is Chapter 5.
+
+### CSV
+
+CSV values are always strings once read; every number needs conversion. The `csv` module handles quoting, delimiters, and embedded newlines that naive `split(",")` breaks on.
+
+```python
+import csv
+
+with Path("users.csv").open(encoding="utf-8", newline="") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        print(row["name"], int(row["age"]))
+```
+
+Writing:
+
+```python
+rows = [{"name": "Ada", "age": 36}, {"name": "Grace", "age": 45}]
+
+with Path("out.csv").open("w", encoding="utf-8", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=["name", "age"])
+    writer.writeheader()
+    writer.writerows(rows)
+```
+
+Rules:
+
+- Open CSV files with `newline=""` so the module controls line endings; otherwise blank lines appear on Windows.
+- `DictReader` uses the first row as keys. Values are strings; convert with `int`/`float`/custom parsers and expect `ValueError` on bad data.
+- DictWriter writes fields in `fieldnames` order; missing keys error unless you pass `restval`, and extra keys error unless you pass `extrasaction="ignore"`.
+- `csv.reader` yields lists; `DictReader` yields dicts. Dicts are usually clearer.
+- Quoting is automatic: a field containing commas, quotes, or newlines is wrapped and quotes are doubled. Do not hand-roll CSV with `split`/`join`.
+- For Excel-produced files, `encoding="utf-8-sig"` strips the BOM.
+- For positional columns, empty cells become `""` (or `None` with `restval`); do not confuse `""` with missing.
+
+Pandas (Chapter 7) is the right tool for large, numeric, multi-join datasets. The `csv` module is right for small, streaming, dependency-free processing.
 
 ## Group D — JSON
 
@@ -951,6 +697,47 @@ with Path("out.csv").open("w", encoding="utf-8", newline="") as f:
 
 **E16.** Write a complete mini ETL: read `raw.csv` with columns `id,name,total`, convert `id` and `total` to `int`, and write `clean.json` containing a list of dicts sorted by `id`. Include parent-directory creation and UTF-8 handling.
 
+## 3.5 Logging
+
+`logging` is the standard diagnostic channel. `print` writes to stdout for interactive use; logging adds levels, timestamps, module names, and destinations, and can be configured without touching call sites.
+
+```python
+# app/client.py
+import logging
+
+logger = logging.getLogger(__name__)   # one logger per module, named after it
+
+def fetch(url):
+    logger.info("fetching %s", url)     # lazy % formatting
+    ...
+    logger.warning("slow response: %.2fs", elapsed)
+```
+
+```python
+# app/main.py  (entry point only)
+import logging
+
+def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    ...
+```
+
+Rules and details:
+
+- Use `logging.getLogger(__name__)` at module level. The name shows which module logged the message; libraries must never configure the root logger themselves.
+- Call `logging.basicConfig()` exactly once, in the application entry point. Calling it again without `force=True` does nothing because handlers already exist. Library modules must not call it at all, or they hijack the host application's logging.
+- Levels, in increasing severity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. The root logger defaults to `WARNING`, which is why `logger.info` seems to "do nothing" before configuration.
+- Prefer `logger.info("fetched %s in %.1fs", url, seconds)` over f-strings. The parameters are formatted only if the record is emitted, and the message stays a fixed template. In `logger.debug`, f-strings eagerly build expensive strings even when debug is off.
+- Inside an `except` block, `logger.exception("failed to fetch %s", url)` logs the message plus traceback (`exc_info=True`). Use it instead of `logger.error` when you want the stack.
+- Log enough context to diagnose without logging secrets: no API keys, tokens, passwords, or full headers. Redact before logging.
+- Do not swallow exceptions with `except ...: pass`; log them or re-raise (Chapter 2).
+- Structured logging (JSON lines) is standard for services: emit fields like `event`, `request_id`, `latency_ms` so log systems can query them. You can approximate it with a JSON formatter; full treatment is Chapter 8.
+- Configuration can come from the environment: parse `LOG_LEVEL` with a safe fallback (`getattr(logging, name.upper(), logging.INFO)` after validating).
+- Handlers determine destination (console, file, syslog); formatters determine the line format. `logging.basicConfig(handlers=[...])` or `dictConfig` wires them. Keep it simple until you need files and rotation.
+
 ## Group F — Logging
 
 **F1.** In `app/clients/llm.py`, state the exact logger name produced by `logging.getLogger(__name__)`.
@@ -1046,6 +833,54 @@ child.debug("hidden?")
 
 **F20.** A shared module at import time runs `logging.basicConfig(level=logging.DEBUG)`. Explain two concrete problems this causes in a host application, and state where configuration belongs.
 
+## 3.6 Debugging and tracebacks
+
+A traceback reads from the bottom up:
+
+```text
+Traceback (most recent call last):
+  File "app/main.py", line 12, in <module>
+    main()
+  File "app/main.py", line 8, in main
+    print(load(path)["items"])
+          ~~~~^^^^^^^^^^^^^^^^
+KeyError: 'items'
+```
+
+- The last line is the exception type and message: `KeyError: 'items'`.
+- The line above it points at the failing expression, often with `^^^` markers.
+- Frames are ordered oldest call first; every frame belonging to your code is a candidate for scrutiny. Third-party frames in the middle are usually victims, not causes.
+- Chained exceptions show `The above exception was the direct cause of the following exception` (from `raise ... from e`) or `During handling of the above exception, another exception occurred` (implicit). Read the first chain link when the bottom error is a generic wrapper.
+
+The workflow:
+
+1. Read the bottom line. Identify the exception type and message.
+2. Find the topmost frame inside your own code.
+3. Check the values on that line (types, `None`, key presence) — most bugs are `None` where an object was expected or a missing key.
+4. Reproduce minimally: copy the failing call into a scratch file with literal inputs.
+5. Fix, then add a test (Chapter 4) so it cannot silently return.
+
+Tools:
+
+- `python -i script.py` drops into an interactive session after a crash with traceback state available.
+- `breakpoint()` (Python 3.7+) starts the built-in debugger `pdb` at that line: `p` prints, `n` steps over, `s` steps into, `c` continues, `q` quits.
+- `python -m pdb script.py` debugs from the first line.
+- `logging` beats `print` for anything beyond one-off exploration because it can be left in place and configured at runtime.
+- `assert` documents invariants while developing; it is removed under `python -O` and is not input validation (Chapter 2).
+
+Error-type quick reference:
+
+| Exception | Typical cause |
+| --- | --- |
+| `ModuleNotFoundError` | package not installed in the *active* environment, or wrong import path |
+| `ImportError` | name does not exist in an existing module (often circular import) |
+| `AttributeError` | object is not the type you think, frequently `None` |
+| `TypeError: NoneType is not subscriptable` | a function returned `None` where a dict/list was expected |
+| `KeyError` | dict key missing; use `.get` or fix upstream validation |
+| `FileNotFoundError` | wrong working directory or typo; anchor with `Path(__file__)` |
+| `json.JSONDecodeError` | malformed JSON (trailing comma, single quotes) |
+| `ConnectionError`/`Timeout` | network, DNS, firewall, or missing timeout handling |
+
 ## Group G — Debugging and tracebacks
 
 **G1.** For this traceback, state the exception type, the exact failing line, the likely root cause, and a one-line fix:
@@ -1110,6 +945,75 @@ except ValueError:
 **G15.** Explain why the topmost frame in your own code is usually more interesting than the third-party frames below it in a library-internal traceback.
 
 **G16.** A traceback shows a frame inside an installed package, and you suspect a version mismatch. State the two commands that show the installed version and where it lives.
+
+## 3.7 HTTP requests with `httpx`
+
+`httpx` is a modern synchronous-and-asynchronous HTTP client. Chapter 6 uses its async API; here is the synchronous side, which is all you need for scripts and many services.
+
+```python
+import httpx
+
+response = httpx.get("https://api.example.com/users/1", timeout=10.0)
+print(response.status_code)          # 200
+data = response.json()               # parses JSON body
+print(response.headers["content-type"])
+```
+
+Always check status and set an explicit timeout:
+
+```python
+def fetch_user(user_id: int) -> dict:
+    response = httpx.get(f"https://api.example.com/users/{user_id}", timeout=10.0)
+    response.raise_for_status()      # raises httpx.HTTPStatusError for 4xx/5xx
+    return response.json()
+```
+
+Rules:
+
+- Never leave timeouts implicit. `httpx` defaults to 5 seconds per phase (unlike `requests`, which defaults to no timeout), but production code should state its budget: `timeout=httpx.Timeout(10.0, connect=5.0)` or the simple `timeout=10.0`.
+- `response.raise_for_status()` is the shortest path to "fail on HTTP errors." Without it, a 500 response body flows onward as if it were valid data.
+- `response.json()` raises `json.JSONDecodeError` on invalid JSON. Do not assume the body is JSON just because the request succeeded.
+- `response.text` decodes using the response charset; `response.content` is raw bytes.
+
+### Reuse connections with a Client
+
+```python
+with httpx.Client(base_url="https://api.example.com", timeout=10.0) as client:
+    users = client.get("/users").raise_for_status().json()
+    user = client.get(f"/users/{users[0]['id']}").raise_for_status().json()
+```
+
+- A `Client` pools connections and carries shared configuration (`base_url`, headers, auth, timeouts). Creating a client per request forfeits pooling and is the most common performance mistake.
+- Always close it with `with` or `client.close()`; Chapter 6 makes the async equivalent explicit.
+- Pass query parameters with `params=` and JSON bodies with `json=` (which sets `content-type: application/json` and serializes the object):
+
+```python
+client.post("/users", json={"name": "Ada"}, params={"notify": "true"})
+```
+
+### Errors and retries
+
+```python
+import httpx
+
+try:
+    response = client.get("/users/1")
+    response.raise_for_status()
+except httpx.HTTPStatusError as e:
+    if e.response.status_code < 500:
+        raise                # 4xx: not retryable, fix the request
+    raise
+except httpx.TimeoutException:
+    ...                      # connect/read timeout
+except httpx.RequestError:
+    ...                      # DNS, connection refused, TLS, and other transport failures
+```
+
+Hierarchy: `httpx.HTTPError` is the base; `HTTPStatusError` covers bad statuses; `RequestError` (with `TimeoutException`, `ConnectError`, ...) covers transport problems. Catch the narrowest type that matches your policy.
+
+Retry only transient failures (timeouts, connection resets, 429, 5xx), with a small bounded number of attempts and a delay. Never retry a 400, 401, or 404. Chapter 8 builds the full retry policy; the pattern is a `for` loop with `break`/`continue` and a final raise.
+
+Security hygiene: never log the `Authorization` header or full request/response bodies by default; redact secrets when logging headers.
 
 ## Group H — HTTP requests with `httpx`
 
@@ -1177,6 +1081,68 @@ def create_user(name, token):
     return response.json()
 ```
 
+## 3.8 Command-line scripts and configuration validation
+
+`argparse` is the standard-library CLI framework. Even a 20-line script benefits from named, typed arguments.
+
+```python
+import argparse
+import sys
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Import records from an API.")
+    parser.add_argument("input", help="path to the input JSON file")
+    parser.add_argument("--limit", type=int, default=100, help="max records (default: 100)")
+    parser.add_argument("--output", default="out.json", help="output path")
+    parser.add_argument("--verbose", action="store_true", help="enable debug logging")
+    return parser
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    ...
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Conventions that make scripts testable and scriptable:
+
+- `main(argv=None)` takes arguments explicitly; `parse_args(None)` reads `sys.argv`. Tests call `main(["--limit", "5", "in.json"])` without spawning a process.
+- Return an exit code (`0` success, `1` expected failure) and let the `__main__` guard call `sys.exit`. This makes shell automation reliable.
+- `argparse` handles `--help`, `type=int` conversion, and missing required arguments for you. A bad value exits with code 2 and prints usage.
+- Positional arguments for the primary inputs; options with `--` for everything else. Give every option a default or make it `required=True`.
+- Precedence when combining CLI flags, environment variables, and defaults: explicit CLI flag > environment variable > built-in default. Implement one merge function with that order, at startup.
+- Validate the assembled configuration in one place before doing any work; print all problems, use clear messages, and exit non-zero. Do not discover a bad URL after fetching half a dataset.
+- `--verbose` conventionally lowers the log level; wire it to `logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)`.
+- Write help text as if it were documentation: it is the first thing users run.
+
+A typical main flow:
+
+```python
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
+                        format="%(levelname)s %(name)s %(message)s")
+    logger = logging.getLogger("app")
+
+    try:
+        settings = load_settings(dict(os.environ))
+    except ConfigError as e:
+        logger.error("configuration error: %s", e)
+        return 1
+
+    try:
+        records = load_input(Path(args.input))
+    except FileNotFoundError:
+        logger.error("input file not found: %s", args.input)
+        return 1
+
+    save_json(Path(args.output), records)
+    logger.info("wrote %d records to %s", len(records), args.output)
+    return 0
+```
+
 ## Group I — Command-line scripts and configuration validation
 
 **I1.** Given this parser, predict each value printed for `argv = ["in.json", "--limit", "5"]`:
@@ -1226,6 +1192,40 @@ print(args.input, args.limit)
 **I18.** Write `build_parser()` for a script with sensible help text for every argument: a positional `config`, `--log-level` with choices and default, and `--dry-run`.
 
 **I19.** A CLI reads `LOG_LEVEL` from the environment but the user passes `--log-level bogus`. State the desired behavior and implement the validation error.
+
+## 3.9 Common mistakes and idioms
+
+Mistakes to avoid:
+
+1. Running bare `pip install` or `python` from outside the virtual environment.
+2. Committing `.venv/`, `.env`, or absolute paths.
+3. `bool(os.getenv("DEBUG"))` — every non-empty string is truthy.
+4. Reading configuration all over the codebase instead of once at startup into a settings object.
+5. `json.dumps` on `datetime`/`set` without conversion; expecting JavaScript object literals to parse.
+6. Hand-parsing CSV with `split(",")`; forgetting `newline=""`.
+7. `open()` / `write_text` without `encoding="utf-8"`.
+8. Relative paths that depend on the working directory instead of `Path(__file__)`.
+9. `print` for diagnostics in libraries; `basicConfig` in libraries; f-strings in `logger.debug`.
+10. Logging secrets or full headers.
+11. HTTP calls without timeouts or without `raise_for_status()`.
+12. Creating a new `httpx.Client` per request inside a loop.
+13. Retrying permanent failures (4xx) or retrying forever.
+14. CLI scripts with no exit codes, or `main()` that reads `sys.argv` directly, making tests spawn processes.
+15. Validating configuration lazily, producing deep, confusing errors.
+
+Idioms to adopt:
+
+- `python -m venv .venv` + `python -m pip install -e ".[dev]"` for a reproducible baseline.
+- `python -m pip freeze > requirements.txt` to snapshot an environment that must run elsewhere.
+- `Path(__file__).resolve().parent` for code-anchored paths.
+- `Path.mkdir(parents=True, exist_ok=True)` before writes.
+- `json.dumps(data, indent=2, ensure_ascii=False) + "\n"` for committed JSON.
+- `csv.DictReader`/`DictWriter` with `newline=""`.
+- `logger = logging.getLogger(__name__)` per module; configure logging once in `main`.
+- `response.raise_for_status()` immediately after every client call.
+- `main(argv=None) -> int` plus `sys.exit(main())` for every script.
+
+---
 
 ## Group J — Mixed realistic tasks
 
@@ -1291,4 +1291,4 @@ Check yourself against the chapter outcome without looking back at the notes:
 - Make HTTP calls with timeouts, `raise_for_status`, a reused client, bounded retries for transient failures only, and redaction.
 - Write CLI scripts with `argparse`, testable `main(argv) -> int`, sensible exit codes, and aggregated configuration errors.
 
-If any group felt slow, redo a subset of its exercises from scratch before continuing to Chapter 4.
+If any group felt slow, redo a subset of its exercises from scratch before continuing to [Chapter 4](../chapter-4/testing-quality.md).
