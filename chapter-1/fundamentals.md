@@ -148,6 +148,77 @@ Booleans are numbers: `True == 1` and `True + True == 2`. Never use this for ari
 
 ---
 
+
+
+## Group B — Numbers
+
+**B1.** Predict both lines:
+
+```python
+print(9 / 2, 9 // 2, 9 % 2)
+print(-9 / 2, -9 // 2, -9 % 2)
+```
+
+**B2.** In JavaScript, `-7 % 2` is `-1`. State the results of `-7 % 2` and `-7 // 2` in Python, and explain the rounding rule for `//` and `%` with negative numbers.
+
+**B3.** Predict the three lines, then write a comparison that correctly checks whether `a` and `b` are equal within a small tolerance:
+
+```python
+a = 0.1 + 0.2
+b = 0.3
+print(a)
+print(a == b)
+print(round(a, 1) == round(b, 1))
+```
+
+**B4.** Predict each value or state that it raises `ValueError`/`TypeError`:
+
+```python
+int("7")
+int(7.9)
+int(-7.9)
+float("7")
+str(7.5)
+int("3.5")
+int("  4  ")
+int("0x10")
+int("0x10", 16)
+```
+
+**B5.** Predict each result: `round(0.5)`, `round(1.5)`, `round(2.5)`, `round(-1.5)`, `round(-0.5)`, `round(3.14159, 2)`. Name the rounding mode Python uses.
+
+**B6.** Predict the two tuples: `divmod(17, 5)` and `divmod(-17, 5)`.
+
+**B7.** Predict each expression: `2 ** 64`, `2 ** 0.5`, `10 ** 20 + 1`, `-3 ** 2`, `(-3) ** 2`, `7 // 2 * 2 + 7 % 2`.
+
+**B8.** State the value of each literal: `1_000_000`, `0b1011`, `0o12`, `0xFF`, `1e3`. Which of these are valid TypeScript literals as well?
+
+**B9.** Predict each expression, paying attention to precedence and associativity: `2 + 3 * 4 ** 2`, `(2 + 3) * 4`, `10 - 4 - 3`, `2 ** 3 ** 2`.
+
+**B10.** Predict the output and explain why it is not `3.0`:
+
+```python
+print(True + True + False)
+print(sum([True, True, False]))
+print(isinstance(True, int))
+```
+
+**B11.** Write `count_down(n)` that prints `n, n-1, ..., 1, 0`, then `"liftoff"`, using a `while` loop. Then write the same with a `for` loop and `range`.
+
+**B12.** Write `is_close(a, b, tol=1e-9)` returning a boolean, and use it to compare `0.1 + 0.2` with `0.3`.
+
+**B13.** Predict the outputs and state what the second demonstrates about NaN:
+
+```python
+import math
+print(math.inf > 10 ** 100)
+nan = float("nan")
+print(nan == nan, math.isnan(nan))
+```
+
+**B14.** Predict `-1 // 10` and `-1 % 10`. Explain why the remainder is not `-1` as in JavaScript.
+
+**B15.** A function receives `total` in cents and must print a currency string rounded to cents. Given `total = 123456.789`, write an f-string producing `$1,234.57` (assume `total` is already a plain number; you may divide by 100 first if you prefer).
 ## 3. Strings
 
 Strings are **immutable sequences of Unicode code points**.
@@ -226,6 +297,90 @@ Details worth remembering:
 
 ---
 
+
+
+## Group C — Strings
+
+**C1.** Given `s = "mathematics"`, predict each expression: `s[:4]`, `s[4:]`, `s[-3:]`, `s[::3]`, `s[::-1]`, `s[2:100]`, `s[100:200]`, `s[100]`.
+
+**C2.** Write two different expressions or functions that reverse a string.
+
+**C3.** For each line, state whether it succeeds or raises, and why:
+
+```python
+s = "data"
+s[0] = "D"
+s = s.replace("d", "D")
+s += "set"
+```
+
+**C4.** Given `x = 12.3456`, `n = 7`, `name = "api"`, predict each printed line:
+
+```python
+print(f"{x:.2f}")
+print(f"{n:03d}")
+print(f"{n / 8:.1%}")
+print(f"{name.upper()} v{n}")
+print(f"{n=}")
+```
+
+**C5.** Using `parts = ["alpha", "beta", "gamma"]` and its text form `"alpha-beta-gamma"`, write one expression that joins and one that parses back to the original list.
+
+**C6.** Fix this line so it prints `retries: 3` without manual concatenation of mixed types:
+
+```python
+print("retries: " + 3)
+```
+
+**C7.** Predict each printed line:
+
+```python
+print("a b  c".split())
+print("a b  c".split(" "))
+print("a,b,".split(","))
+print(",".join(["x", "y"]))
+print(",".join([]))
+```
+
+**C8.** Predict: `"a-b-c".replace("-", "_").replace("a", "A")`.
+
+**C9.** Given `s = "banana"`, predict all four: `s.find("an")`, `s.rfind("an")`, `s.index("an")`, `s.count("an")`.
+
+**C10.** Write `is_palindrome(text)` that ignores case and all non-alphanumeric characters. Example: `"A man, a plan, a canal: Panama"` returns `True`.
+
+**C11.** Predict each printed line and explain the difference between `str` and `repr`:
+
+```python
+print("a")
+print(repr("a"))
+print(["a", "b"])
+```
+
+**C12.** Predict each printed line and the length in the last line:
+
+```python
+print("a\nb")
+print(r"a\nb")
+print("""x
+y""")
+print(len("\t"))
+```
+
+**C13.** Write `normalize(text)` that trims the ends and collapses any run of whitespace (spaces, tabs, newlines) into a single space, using `split()` and `join`. Example: `normalize("  a \t b\n c ")` returns `"a b c"`.
+
+**C14.** Given `total = 1234.5678`, predict `f"{total:,.2f}"`. Then write an expression producing `75%` from the float `0.75` using a format spec, not string concatenation.
+
+**C15.** Predict: `"an" in "banana"`, `"x" in "banana"`, `"b" in ["b"]`, `"ab" in "abc"`.
+
+**C16.** Predict each result: `"xxabcxx".strip("x")`, `"xxabcxx".lstrip("x")`, `"xxabcxx".rstrip("x")`, `"abc".center(7, "-")`.
+
+**C17.** Write `initials(full_name)` turning `"ada lovelace"` into `"A.L."` (uppercase initial and dot for each word, split on whitespace).
+
+**C18.** Given a list of raw CSV lines, write an expression that splits each line on commas and strips each field:
+
+```python
+lines = ["a, b ,c", "1,2, 3"]
+```
 ## 4. Booleans, `None`, and truthiness
 
 Booleans are capitalized: `True` and `False` (TypeScript's `true`/`false` do not exist). The null-like value is `None`.
@@ -290,6 +445,61 @@ There is no `??` or `?.` operator. Use explicit `is None` checks or `dict.get`.
 
 ---
 
+
+
+## Group D — Booleans, `None`, and truthiness
+
+**D1.** Classify each as truthy or falsy: `0`, `"0"`, `[]`, `[0]`, `""`, `" "`, `None`, `{}`, `set()`, `-1`, `0.0`, `range(0)`.
+
+**D2.** Predict each: `bool(0.1)`, `bool("False")`, `bool([[]])`, `bool(range(1))`, `bool(None)`, `bool(-0.0)`.
+
+**D3.** Predict the output for `name = ""` and then for `name = 0`, and explain the difference between the two checks:
+
+```python
+if name is None:
+    print("None branch")
+if not name:
+    print("falsy branch")
+```
+
+**D4.** Predict all five lines:
+
+```python
+print(3 and 4)
+print(0 and 4)
+print(3 or 4)
+print(0 or 4)
+print([] or {} or "x")
+```
+
+**D5.** This default-value idiom is wrong when `port = 0` is a valid setting. Explain what happens and rewrite it correctly:
+
+```python
+port = settings.get("port") or 8080
+```
+
+**D6.** Write `display_name(user)` returning the user's `"name"` when it is a non-empty string, and `"anonymous"` otherwise. The name may be missing (use `None`), `""`, or a valid string.
+
+**D7.** Predict all four printed values:
+
+```python
+x = None
+print(x == None)
+print(x is None)
+print(x == False)
+print(bool(x))
+```
+
+**D8.** Predict each printed line:
+
+```python
+score = 55
+print("pass" if score >= 60 else "fail")
+x = 0
+print("zero" if not x else "nonzero")
+```
+
+**D9.** Write `is_valid(payload)` returning `True` only when `payload` is a non-empty dict whose `"id"` key exists and is a non-zero integer. No exceptions should escape the function.
 ## 5. Identity and equality
 
 Two operators that TypeScript does not separate:
@@ -346,6 +556,141 @@ NaN is never equal to itself: `float("nan") == float("nan")` is `False`. Detect 
 
 ---
 
+
+
+## Group A — Names, aliasing, identity, and mutability
+
+**A1.** Predict the output:
+
+```python
+a = [1, 2]
+b = a
+c = a[:]
+b.append(3)
+c.append(4)
+print(a, c)
+```
+
+**A2.** Predict the output:
+
+```python
+x = {"n": 1}
+y = x
+x["n"] = 2
+y = {"n": 3}
+print(x, y)
+```
+
+**A3.** Predict the output and explain why `xs` ends as it does:
+
+```python
+def add_item(items, item):
+    items.append(item)
+
+def replace(items):
+    items = []
+
+xs = [1]
+add_item(xs, 2)
+replace(xs)
+print(xs)
+```
+
+**A4.** The following code was meant to copy `original` so that mutating `copy` leaves `original` untouched, but it has a bug. Identify the bug and give two different fixes:
+
+```python
+original = [1, 2, 3]
+copy = original
+copy.append(4)
+print(original)
+```
+
+**A5.** For each pair, state whether `a is b`, `a == b`, both, or neither is `True`, and explain:
+
+```python
+a = [1, 2, 3]
+b = [1, 2, 3]
+```
+
+```python
+a = (1, 2)
+b = a
+```
+
+```python
+a = "hello"
+b = "hello"
+```
+
+**A6.** Predict the output:
+
+```python
+a = [1, 2, 3]
+b = a
+b = b + [4]
+b += [5]
+print(a, b)
+```
+
+**A7.** Predict both outputs:
+
+```python
+import copy
+
+a = [[1], [2]]
+b = a[:]
+c = copy.deepcopy(a)
+b[0].append(9)
+b.append([3])
+print(a)
+print(c)
+```
+
+**A8.** When run in a REPL, `a = 1000; b = 1000; a is b` may print `False`, yet `a = 256; b = 256; a is b` prints `True`. Explain both results and state the rule you should follow in your own code.
+
+**A9.** Predict the four printed booleans:
+
+```python
+a = [1]
+b = [1]
+c = a
+print(a is b, a is c, a == b, a == c)
+```
+
+**A10.** For each type, state whether values are mutable and whether the type is hashable: `int`, `str`, `list`, `tuple`, `dict`, `set`, `frozenset`, `bool`, `None`.
+
+**A11.** Fill in the blank four different ways such that `b` is a copy that can be mutated independently of `a` (shallow copies are acceptable unless stated otherwise):
+
+```python
+a = [[1, 2], [3, 4]]
+b = ______  # must not be "a"
+```
+
+**A12.** One of the following statements succeeds and the other raises. Identify which is which, give the exact exception type, and explain the difference:
+
+```python
+t = (1, [2, 3])
+t[1].append(4)
+t[0] = 9
+```
+
+**A13.** Write a function `same_object(a, b)` that returns `True` when the two arguments are the same object, implemented (a) with `id()` and (b) with `is`. State which one you would actually use.
+
+**A14.** Predict the output:
+
+```python
+a = 5
+b = a
+a += 1
+print(a, b)
+```
+
+**A15.** Explain why this function does not modify the caller's list, then rewrite it so it does:
+
+```python
+def clear_all(xs):
+    xs = []
+```
 ## 6. Lists
 
 Lists are mutable, ordered, heterogeneous sequences — the Python workhorse for ordered collections.
@@ -436,6 +781,115 @@ Other useful facts:
 
 ---
 
+
+
+## Group E — Lists
+
+**E1.** Predict the output:
+
+```python
+a = [1, 2]
+a.append([3, 4])
+b = [1, 2]
+b.extend([3, 4])
+print(a, b)
+```
+
+**E2.** Predict each output (note the last line uses `xs.index(3)`):
+
+```python
+xs = [1, 2, 3, 2]
+xs.remove(2)
+print(xs)
+print(xs.pop())
+print(xs)
+print(xs.index(3))
+```
+
+**E3.** Predict both printed lines and explain the `None`:
+
+```python
+xs = [3, 1, 2]
+ys = xs.sort()
+print(xs, ys)
+zs = sorted(xs)
+print(xs, zs)
+```
+
+**E4.** Predict both outputs and explain why they differ:
+
+```python
+a = [[0]] * 2
+b = [[0] for _ in range(2)]
+a[0][0] = 5
+b[0][0] = 5
+print(a, b)
+```
+
+**E5.** Given `xs = [0, 1, 2, 3, 4, 5]`, predict each: `xs[1:4]`, `xs[-2:]`, `xs[:2]`, `xs[::2]`, `xs[1::2]`, `xs[5:1]`, `xs[5:1:-1]`.
+
+**E6.** Predict each output:
+
+```python
+xs = [1, 2, 3, 4]
+xs[1:3] = [9]
+print(xs, len(xs))
+xs[0:2] = []
+print(xs)
+```
+
+**E7.** For `xs = ["a", "b", "c", "d"]`, predict the result of `del xs[0]`, then `del xs[1:3]` applied to the result.
+
+**E8.** Predict the outputs and say which names alias each other:
+
+```python
+xs = [1, 2, 3]
+ys = xs
+zs = xs[:]
+ys.append(4)
+zs.append(5)
+print(xs, ys, zs)
+print(xs is ys, xs is zs, xs == zs)
+```
+
+**E9.** Predict each: `2 in [1, 2, 3]`, `[1, 2] in [[1, 2], [3]]`, `[1, 2] == [1, 2, 3]`, `[1, [2]] == [1, [2]]`.
+
+**E10.** Write `remove_duplicates(xs)` returning a new list with duplicates removed, preserving first-occurrence order. Do not mutate the input.
+
+**E11.** Write `flatten(matrix)` turning `[[1, 2], [3], []]` into `[1, 2, 3]`.
+
+**E12.** Predict each output:
+
+```python
+print(sum([1, 2, 3]), min("bca"), max([1, 5, 3]))
+words = ["bb", "a", "ccc"]
+print(sorted(words, key=len, reverse=True))
+```
+
+**E13.** The code below tries to remove all even numbers but leaves one behind. Explain the mechanism and fix it:
+
+```python
+nums = [1, 2, 2, 3]
+for n in nums:
+    if n % 2 == 0:
+        nums.remove(n)
+print(nums)
+```
+
+**E14.** Given `names = ["Ada", "Grace", "Alan"]`, write a single expression producing `[3, 5, 4]`.
+
+**E15.** Predict: `list(range(5))`, `list(range(2, 5))`, `list("ab")`, `[0] * 3`, `[] + [1]`.
+
+**E16.** Predict the output and explain:
+
+```python
+a = [1, 2]
+b = a * 2
+a.append(3)
+print(b, a)
+```
+
+**E17.** Write `second_largest(xs)` returning the second largest distinct value or `None` for lists with fewer than two distinct values. Examples: `[3, 1, 4, 4]` returns `3`; `[5, 5]` returns `None`.
 ## 7. Tuples
 
 Tuples are immutable sequences, typically used for fixed-shape records and multiple return values.
@@ -466,6 +920,81 @@ Choosing between list and tuple: use a list for homogeneous, growable sequences;
 
 ---
 
+
+
+## Group F — Tuples and unpacking
+
+**F1.** For each expression, state whether the result is a tuple and why: `1,`, `(1)`, `(1,)`, `()`, `tuple("ab")`, `(1, 2)[0:1]`.
+
+**F2.** Predict each output:
+
+```python
+t = (1, 2, 3)
+a, b, c = t
+print(a, b, c)
+x, *rest = t
+print(x, rest)
+```
+
+**F3.** Predict both printed lines:
+
+```python
+first, *middle, last = [1, 2, 3, 4, 5]
+print(first, middle, last)
+*x, = [1, 2]
+print(x)
+```
+
+**F4.** Predict the output and name the idiom in use:
+
+```python
+a, b = 1, 2
+b, a = a, b
+print(a, b)
+```
+
+**F5.** Identify which statements raise and which succeed, and explain the last two:
+
+```python
+t = (1, 2, 3)
+t[0] = 9
+t = t + (4,)
+t += (5,)
+```
+
+**F6.** Which of these are valid dictionary keys and why: `(1, 2)`, `(1, [2])`, `frozenset({1})`, `[1]`, `(1, (2, 3))`?
+
+**F7.** Given `people = [("Ada", 36), ("Grace", 45)]`, write a loop printing `1 Ada 36` and `2 Grace 45` using `enumerate` and tuple unpacking in the header.
+
+**F8.** Predict the output and explain what `zip(*rows)` does:
+
+```python
+rows = [(1, "a"), (2, "b")]
+columns = list(zip(*rows))
+print(columns)
+```
+
+**F9.** Write `min_max(xs)` that returns a tuple `(smallest, largest)` and show, in two lines of caller code, how to unpack the result.
+
+**F10.** Explain the exact error raised by `a, b = [1, 2, 3]` and by `a, b, c = [1, 2]`.
+
+**F11.** Rewrite this loop to unpack `item` directly in the `for` header:
+
+```python
+for item in [("a", 1), ("b", 2)]:
+    name = item[0]
+    value = item[1]
+```
+
+**F12.** Write a single assignment statement that rotates three variables so that after `a, b, c = 1, 2, 3` they become `3, 1, 2`.
+
+**F13.** Predict the output:
+
+```python
+data = {"a": 1, "b": 2}
+for index, (key, value) in enumerate(data.items(), start=1):
+    print(index, key, value)
+```
 ## 8. Dictionaries
 
 Dictionaries map hashable keys to values and preserve insertion order.
@@ -522,6 +1051,90 @@ Subtleties:
 
 ---
 
+
+
+## Group G — Dictionaries
+
+**G1.** Predict each printed value:
+
+```python
+d = {"a": 1}
+d["b"] = 2
+print(d.get("c"))
+print(d.get("c", 0))
+print(d.get("a"))
+print(len(d))
+```
+
+**G2.** Given `config = {}`, state which line raises, and the final value of `config` if the raising line is removed:
+
+```python
+config["timeout"] = config.get("timeout", 30)
+value = config.setdefault("retries", 3)
+value = config["missing"]
+```
+
+**G3.** Write `word_counts(words)` returning a dict of counts for the list `["b", "a", "b", "c", "b"]`, using `get`.
+
+**G4.** Predict the exact output order:
+
+```python
+d = {"x": 1, "y": 2}
+for k in d:
+    print(k)
+for v in d.values():
+    print(v)
+for k, v in d.items():
+    print(k, v)
+```
+
+**G5.** Predict all three printed dicts:
+
+```python
+a = {"x": 1, "y": 2}
+b = {"y": 20, "z": 30}
+print({**a, **b})
+print(a | b)
+c = dict(a)
+c.update(b)
+print(c)
+```
+
+**G6.** Predict the resulting dict: `{1: "a", True: "b", 1.0: "c"}`. Explain the collisions.
+
+**G7.** Given:
+
+```python
+response = {"data": {"items": [{"id": 1}, {"id": 2}]}}
+```
+
+write one expression that extracts the id of the second item, and one expression that uses `get` to return `None` instead of raising when `"data"` or `"items"` are missing. (Nested `get` chains are fine.)
+
+**G8.** Write a dict comprehension that inverts `{"a": 1, "b": 2}` into `{1: "a", 2: "b"}`. State what happens if two keys share a value.
+
+**G9.** Predict each: `"a" in {"a": 1}`, `1 in {"a": 1}`, `"a" in {"a": 1}.keys()`, `1 in {"a": 1}.values()`.
+
+**G10.** Given records shaped `{"id": 1, "team": "blue"}`, write code using `setdefault` to build `{"blue": [1, 3], "red": [2]}` from `[{"id": 1, "team": "blue"}, {"id": 2, "team": "red"}, {"id": 3, "team": "blue"}]`.
+
+**G11.** Write `top_words(text, n=3)` returning the `n` most frequent words from a whitespace-split text, sorted by count descending and then alphabetically for ties. Return a list of `(word, count)` tuples.
+
+**G12.** Predict the output: `list(dict.fromkeys(["b", "a", "b", "c", "a"]))`. Explain how this preserves order while deduplicating.
+
+**G13.** Predict both printed lines:
+
+```python
+d = {"a": 1, "b": 2}
+print(d.pop("a"), d)
+print(d.pop("z", None), d)
+```
+
+**G14.** Predict: `dict([("a", 1), ("b", 2)])` and `dict(a=1, b=2)`.
+
+**G15.** Predict and explain: `{"a": 1, "b": 2} == {"b": 2, "a": 1}`.
+
+**G16.** Write `merge_defaults(defaults, overrides)` returning a new dict where `overrides` wins on conflicts, without mutating either input.
+
+**G17.** Write `required_missing(payload, required)` that returns a sorted list of required keys absent from `payload`. Example: `required_missing({"a": 1}, ["a", "b", "c"])` returns `["b", "c"]`.
 ## 9. Sets
 
 Sets are unordered collections of unique hashable elements.
@@ -556,6 +1169,50 @@ Rules and uses:
 
 ---
 
+
+
+## Group H — Sets
+
+**H1.** State what each literal or call produces: `{}`, `set()`, `{1, 2, 2}`, `set("mississippi")`, `set([1, 1, 2]) == {1, 2}`.
+
+**H2.** Predict each, using `sorted(...)` to make the output deterministic:
+
+```python
+a = {1, 2, 3}
+b = {2, 3, 4}
+print(sorted(a | b))
+print(sorted(a & b))
+print(sorted(a - b))
+print(sorted(a ^ b))
+```
+
+**H3.** For each statement on `s = {1, 2}`, state whether it raises or silently does nothing: `s.add(3)`, `s.discard(9)`, `s.remove(9)`, `s.pop()`, `s.clear()`.
+
+**H4.** Explain why checking `x in large_collection` is faster for a set than for a list, and rewrite this loop to use a set:
+
+```python
+seen = []
+for item in stream:
+    if item not in seen:
+        seen.append(item)
+        process(item)
+```
+
+**H5.** Explain the exact error raised by `{1, 2, 3}[0]` and the correct way to get an arbitrary element.
+
+**H6.** State the error raised by `{1, [2, 3]}` and give two different fixes that keep the "collection of items" meaning.
+
+**H7.** Predict: `{1, 2} <= {1, 2, 3}`, `{1, 2, 3} >= {1, 2}`, `{1, 2} < {1, 2}`, `{1, 2} < {1, 2, 3}`.
+
+**H8.** Write `changed_ids(old_ids, new_ids)` returning the set of ids that were added or removed between two collections of ids, in one expression using a set operator.
+
+**H9.** Deduplicate `["b", "a", "b", "c"]` two ways: once with a set (losing order) and once preserving order. Explain when each is acceptable.
+
+**H10.** Explain why `frozenset({"read", "write"})` can be used as a dict key while `{"read", "write"}` cannot, and write three lines that use a frozenset key in a dict.
+
+**H11.** Predict each: `2 in {1, 2}`, `2 in {1: "b"}`, `"a" in {"a": 1}`, `[1] in {1, 2}`.
+
+**H12.** Given two lists of tags, `old_tags` and `new_tags`, write code producing (a) tags present in both, (b) tags only in `new_tags`, (c) all tags, deduplicated. Use set operations and return sorted lists for deterministic output.
 ## 10. Conditionals and loops
 
 ### Indentation defines blocks
@@ -674,6 +1331,142 @@ Traps:
 
 ---
 
+
+
+## Group I — Conditionals and loops
+
+**I1.** Predict the exact output lines:
+
+```python
+x = 5
+if x > 0:
+    print("pos")
+    if x > 10:
+        print("big")
+    print("done")
+print("end")
+```
+
+**I2.** Predict the exact output:
+
+```python
+for n in [2, 4, 6]:
+    if n % 2:
+        break
+else:
+    print("all even")
+
+for n in [2, 3, 4]:
+    if n % 2:
+        break
+else:
+    print("all even")
+print("done")
+```
+
+**I3.** Predict each: `list(range(4))`, `list(range(2, 8, 2))`, `list(range(5, 0, -1))`, `list(range(0))`.
+
+**I4.** Predict the output:
+
+```python
+for i, ch in enumerate("abc", start=10):
+    print(i, ch)
+```
+
+**I5.** Predict the output and explain the truncation:
+
+```python
+print(list(zip([1, 2, 3], "ab")))
+```
+
+**I6.** Predict the value of `i` printed at the end and the total number of iterations:
+
+```python
+i = 0
+total = 0
+while i < 5:
+    i += 1
+    if i % 2 == 0:
+        continue
+    total += i
+print(total, i)
+```
+
+**I7.** Predict the full output:
+
+```python
+for i in range(2):
+    for j in range(2):
+        print(i, j)
+```
+
+**I8.** Predict the output and explain why it works even though Python has no block scope:
+
+```python
+for i in range(3):
+    pass
+print(i)
+```
+
+**I9.** Predict each boolean: `5 < 10 < 15`, `5 < 10 > 3`, `1 == 1.0 < 2`, `10 < 5 < 15`, `1 < 2 < "a"`.
+
+**I10.** Predict each: `any(x > 3 for x in [1, 2])`, `all(x > 0 for x in [1, 2])`, `all([])`, `any([])`.
+
+**I11.** Rewrite this loop idiomatically without index arithmetic:
+
+```python
+xs = ["a", "b", "c"]
+for i in range(len(xs)):
+    print(i, xs[i])
+```
+
+**I12.** Predict each call result (Python 3.10+):
+
+```python
+def handle(code):
+    match code:
+        case 200:
+            return "ok"
+        case 404 | 410:
+            return "gone"
+        case _:
+            return "other"
+
+print(handle(200), handle(410), handle(500))
+```
+
+**I13.** Write `first_negative(xs)` returning the first negative number found, or `None` if there is none. Then write a second version using a `for ... else` that reports `"none found"` inside the loop construct itself.
+
+**I14.** Write `classify_status(code)` where 100–199 returns `"info"`, 200–299 `"success"`, 300–399 `"redirect"`, 400–499 `"client_error"`, 500–599 `"server_error"`, and anything else `"unknown"`. Use chained comparisons.
+
+**I15.** In nested loops, what does `break` inside the inner loop actually exit? Write a two-loop example that breaks out of both loops using a flag or a function return.
+
+**I16.** Predict each printed line:
+
+```python
+x = 5
+print("small" if x < 10 else "big")
+items = []
+print("empty" if not items else "full")
+```
+
+**I17.** Identify every error in this snippet (there are at least two) and rewrite it so it prints `1` through `3`:
+
+```python
+for i in range(1, 4)
+print(i)
+```
+
+**I18.** Trace this loop and give the exact sequence of printed values:
+
+```python
+i = 3
+while i:
+    print(i)
+    i -= 1
+```
+
+**I19.** Write a retry loop skeleton: `attempts` starts at 0; call `fetch()` at most 3 times; stop early if it returns a truthy result; after the loop, return the result or `None`. Use `while`, `break`, and truthiness.
 ## 11. Comprehensions
 
 Comprehensions build a new collection from an iterable in one expression. They are central to idiomatic Python.
@@ -713,6 +1506,78 @@ Generators get full treatment in Chapter 2; for now, use them where a function l
 
 ---
 
+
+
+## Group J — Comprehensions
+
+**J1.** Predict the output: `[x * 2 for x in [1, 2, 3]]`.
+
+**J2.** Predict the output: `[x for x in [4, -1, 5, -2] if x > 0]`.
+
+**J3.** Predict both outputs:
+
+```python
+print([x if x > 0 else -x for x in [4, -1, 5, -2]])
+print([-x if x > 0 else x for x in [4, -1]])
+```
+
+**J4.** Given `keys = ["a", "b"]` and `values = [1, 2]`, write a dict comprehension producing `{"a": 1, "b": 2}`.
+
+**J5.** Predict the output: `sorted({len(w) for w in ["a", "bb", "c", "ddd"]})`.
+
+**J6.** Predict the output: `[n for row in [[1, 2], [3]] for n in row]`.
+
+**J7.** Predict the output: `[(x, y) for x in [1, 2] for y in ["a", "b"]]`. Then state how the nested loops would be written as a normal `for` loop.
+
+**J8.** Predict both printed lines and explain why the second is not `1`:
+
+```python
+x = "outer"
+print([x for x in range(2)])
+print(x)
+```
+
+**J9.** Rewrite this loop as a single comprehension:
+
+```python
+result = []
+for n in range(10):
+    if n % 3 == 0:
+        result.append(n * n)
+```
+
+**J10.** Given `lines = ["  Alpha ", "BETA", " gamma "]`, write a comprehension producing `["alpha", "beta", "gamma"]`.
+
+**J11.** Predict the output: `sum(x * x for x in range(4))`. Explain what is different between this and `sum([x * x for x in range(4)])`.
+
+**J12.** Identify the anti-pattern and rewrite it correctly:
+
+```python
+[print(x) for x in [1, 2, 3]]
+```
+
+**J13.** Given records `[{"id": 1, "name": "a", "active": True}, {"id": 2, "name": "b", "active": False}, {"id": 3, "name": "c", "active": True}]`, write one dict comprehension mapping `id` to `name` for active records only.
+
+**J14.** Predict the output: `[x * y for x in range(3) if x for y in range(2)]`.
+
+**J15.** Rewrite this as one comprehension:
+
+```python
+names = ["ada", "alan", "grace", "bob"]
+upper_long = []
+for name in names:
+    if len(name) > 3:
+        upper_long.append(name.upper())
+```
+
+**J16.** Write a comprehension that produces the uppercase first letters of words longer than three characters from `["api", "gateway", "ui", "cache"]`. Expected: `["A", "G", "C"]`.
+
+**J17.** Explain why this comprehension is a poor choice and rewrite it as a loop:
+
+```python
+logs = []
+[logs.extend(line.strip().split()) for line in ["a b", "c d"]]
+```
 ## 12. Unpacking
 
 Unpacking distributes the elements of an iterable into names. It is used pervasively in Python code.
@@ -851,958 +1716,7 @@ Python is neither strictly "pass by value" nor "pass by reference": names inside
 
 ---
 
-## 14. Scope
 
-Python resolves names with the **LEGB** rule: **L**ocal, **E**nclosing function, **G**lobal (module), **B**uilt-in.
-
-There is no block scope. Unlike TypeScript's `let`/`const`, a name assigned inside `if`, `for`, or `while` belongs to the enclosing function or module:
-
-```python
-for i in range(3):
-    pass
-print(i)            # 2 -- still defined
-
-if condition:
-    temp = 1
-print(temp)         # works (if the branch ran)
-```
-
-That makes loop variables and temporaries leak, unlike TypeScript.
-
-### Reading versus assigning
-
-Reading a global from a function works. Assigning to a name anywhere in a function makes it local for the *entire* function, which causes `UnboundLocalError` when read before assignment:
-
-```python
-counter = 0
-
-def bump():
-    counter += 1        # UnboundLocalError: local variable 'counter'
-
-def bump():
-    global counter      # explicit; use sparingly
-    counter += 1
-```
-
-For closures, `nonlocal` reassigns a name in the nearest enclosing function scope:
-
-```python
-def make_counter():
-    count = 0
-    def increment():
-        nonlocal count
-        count += 1
-        return count
-    return increment
-```
-
-### Other scope facts
-
-- Builtins (`list`, `id`, `sum`, `dict`, ...) can be shadowed. `list = [1, 2]` breaks `list("ab")` for the rest of that scope. Never do this.
-- Comprehension variables have their own scope and do not leak: after `[x for x in range(3)]`, `x` is undefined unless it existed before.
-- Functions capture variables, not values. Lambdas created in a loop all see the final value:
-
-```python
-funcs = [lambda: i for i in range(3)]
-print([f() for f in funcs])   # [2, 2, 2]
-```
-
-- `del name` removes the binding from the current namespace; it does not destroy the object while other names reference it.
-- Module-level code runs top to bottom at import time; function bodies run only when called. (Modules and imports are covered in Chapter 2.)
-
----
-
-## 15. Idioms and common mistakes
-
-Idioms to adopt:
-
-- `if not xs:` / `if xs is None:` — pick the check that matches the meaning.
-- `enumerate`, `zip`, `items()` instead of index arithmetic.
-- `"".join(parts)` instead of repeated `+=` for strings.
-- `dict.get(key, default)` and `setdefault` for optional and grouped data.
-- Comprehensions instead of `map`/`filter` loops.
-- `a, b = b, a` swaps; star-unpacking for head/tail.
-- f-strings for all formatting.
-- `sorted(data, key=...)` instead of hand-written comparators.
-
-Mistakes to avoid:
-
-1. `xs = xs.sort()` — in-place methods return `None`.
-2. Mutable default arguments (`def f(x, acc=[])`).
-3. `[[0] * 3] * 3` — repeated aliases, not independent rows.
-4. Using `is` to compare values instead of `None`/sentinels.
-5. Expecting `/` to do integer division, or `%` to follow JavaScript sign rules.
-6. `"count: " + n` — no implicit string conversion.
-7. `{}` for an empty set; it is an empty dict.
-8. Mutating a list while iterating over it.
-9. Assuming loop variables disappear after the loop.
-10. Trusting `and`/`or` to return booleans rather than operands.
-11. Assuming `if name:` when `""` is a valid value.
-12. Forgetting the comma in one-element tuples.
-13. `int("3.5")` instead of `int(float("3.5"))`.
-14. Shadowing builtins such as `list`, `id`, `str`, `sum`.
-15. Function calls where `return` was intended, or vice versa.
-
----
-
-# Exercises
-
-Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, and reconcile.
-
-## Group A — Names, aliasing, identity, and mutability
-
-**A1.** Predict the output:
-
-```python
-a = [1, 2]
-b = a
-c = a[:]
-b.append(3)
-c.append(4)
-print(a, c)
-```
-
-**A2.** Predict the output:
-
-```python
-x = {"n": 1}
-y = x
-x["n"] = 2
-y = {"n": 3}
-print(x, y)
-```
-
-**A3.** Predict the output and explain why `xs` ends as it does:
-
-```python
-def add_item(items, item):
-    items.append(item)
-
-def replace(items):
-    items = []
-
-xs = [1]
-add_item(xs, 2)
-replace(xs)
-print(xs)
-```
-
-**A4.** The following code was meant to copy `original` so that mutating `copy` leaves `original` untouched, but it has a bug. Identify the bug and give two different fixes:
-
-```python
-original = [1, 2, 3]
-copy = original
-copy.append(4)
-print(original)
-```
-
-**A5.** For each pair, state whether `a is b`, `a == b`, both, or neither is `True`, and explain:
-
-```python
-a = [1, 2, 3]
-b = [1, 2, 3]
-```
-
-```python
-a = (1, 2)
-b = a
-```
-
-```python
-a = "hello"
-b = "hello"
-```
-
-**A6.** Predict the output:
-
-```python
-a = [1, 2, 3]
-b = a
-b = b + [4]
-b += [5]
-print(a, b)
-```
-
-**A7.** Predict both outputs:
-
-```python
-import copy
-
-a = [[1], [2]]
-b = a[:]
-c = copy.deepcopy(a)
-b[0].append(9)
-b.append([3])
-print(a)
-print(c)
-```
-
-**A8.** When run in a REPL, `a = 1000; b = 1000; a is b` may print `False`, yet `a = 256; b = 256; a is b` prints `True`. Explain both results and state the rule you should follow in your own code.
-
-**A9.** Predict the four printed booleans:
-
-```python
-a = [1]
-b = [1]
-c = a
-print(a is b, a is c, a == b, a == c)
-```
-
-**A10.** For each type, state whether values are mutable and whether the type is hashable: `int`, `str`, `list`, `tuple`, `dict`, `set`, `frozenset`, `bool`, `None`.
-
-**A11.** Fill in the blank four different ways such that `b` is a copy that can be mutated independently of `a` (shallow copies are acceptable unless stated otherwise):
-
-```python
-a = [[1, 2], [3, 4]]
-b = ______  # must not be "a"
-```
-
-**A12.** One of the following statements succeeds and the other raises. Identify which is which, give the exact exception type, and explain the difference:
-
-```python
-t = (1, [2, 3])
-t[1].append(4)
-t[0] = 9
-```
-
-**A13.** Write a function `same_object(a, b)` that returns `True` when the two arguments are the same object, implemented (a) with `id()` and (b) with `is`. State which one you would actually use.
-
-**A14.** Predict the output:
-
-```python
-a = 5
-b = a
-a += 1
-print(a, b)
-```
-
-**A15.** Explain why this function does not modify the caller's list, then rewrite it so it does:
-
-```python
-def clear_all(xs):
-    xs = []
-```
-
-## Group B — Numbers
-
-**B1.** Predict both lines:
-
-```python
-print(9 / 2, 9 // 2, 9 % 2)
-print(-9 / 2, -9 // 2, -9 % 2)
-```
-
-**B2.** In JavaScript, `-7 % 2` is `-1`. State the results of `-7 % 2` and `-7 // 2` in Python, and explain the rounding rule for `//` and `%` with negative numbers.
-
-**B3.** Predict the three lines, then write a comparison that correctly checks whether `a` and `b` are equal within a small tolerance:
-
-```python
-a = 0.1 + 0.2
-b = 0.3
-print(a)
-print(a == b)
-print(round(a, 1) == round(b, 1))
-```
-
-**B4.** Predict each value or state that it raises `ValueError`/`TypeError`:
-
-```python
-int("7")
-int(7.9)
-int(-7.9)
-float("7")
-str(7.5)
-int("3.5")
-int("  4  ")
-int("0x10")
-int("0x10", 16)
-```
-
-**B5.** Predict each result: `round(0.5)`, `round(1.5)`, `round(2.5)`, `round(-1.5)`, `round(-0.5)`, `round(3.14159, 2)`. Name the rounding mode Python uses.
-
-**B6.** Predict the two tuples: `divmod(17, 5)` and `divmod(-17, 5)`.
-
-**B7.** Predict each expression: `2 ** 64`, `2 ** 0.5`, `10 ** 20 + 1`, `-3 ** 2`, `(-3) ** 2`, `7 // 2 * 2 + 7 % 2`.
-
-**B8.** State the value of each literal: `1_000_000`, `0b1011`, `0o12`, `0xFF`, `1e3`. Which of these are valid TypeScript literals as well?
-
-**B9.** Predict each expression, paying attention to precedence and associativity: `2 + 3 * 4 ** 2`, `(2 + 3) * 4`, `10 - 4 - 3`, `2 ** 3 ** 2`.
-
-**B10.** Predict the output and explain why it is not `3.0`:
-
-```python
-print(True + True + False)
-print(sum([True, True, False]))
-print(isinstance(True, int))
-```
-
-**B11.** Write `count_down(n)` that prints `n, n-1, ..., 1, 0`, then `"liftoff"`, using a `while` loop. Then write the same with a `for` loop and `range`.
-
-**B12.** Write `is_close(a, b, tol=1e-9)` returning a boolean, and use it to compare `0.1 + 0.2` with `0.3`.
-
-**B13.** Predict the outputs and state what the second demonstrates about NaN:
-
-```python
-import math
-print(math.inf > 10 ** 100)
-nan = float("nan")
-print(nan == nan, math.isnan(nan))
-```
-
-**B14.** Predict `-1 // 10` and `-1 % 10`. Explain why the remainder is not `-1` as in JavaScript.
-
-**B15.** A function receives `total` in cents and must print a currency string rounded to cents. Given `total = 123456.789`, write an f-string producing `$1,234.57` (assume `total` is already a plain number; you may divide by 100 first if you prefer).
-
-## Group C — Strings
-
-**C1.** Given `s = "mathematics"`, predict each expression: `s[:4]`, `s[4:]`, `s[-3:]`, `s[::3]`, `s[::-1]`, `s[2:100]`, `s[100:200]`, `s[100]`.
-
-**C2.** Write two different expressions or functions that reverse a string.
-
-**C3.** For each line, state whether it succeeds or raises, and why:
-
-```python
-s = "data"
-s[0] = "D"
-s = s.replace("d", "D")
-s += "set"
-```
-
-**C4.** Given `x = 12.3456`, `n = 7`, `name = "api"`, predict each printed line:
-
-```python
-print(f"{x:.2f}")
-print(f"{n:03d}")
-print(f"{n / 8:.1%}")
-print(f"{name.upper()} v{n}")
-print(f"{n=}")
-```
-
-**C5.** Using `parts = ["alpha", "beta", "gamma"]` and its text form `"alpha-beta-gamma"`, write one expression that joins and one that parses back to the original list.
-
-**C6.** Fix this line so it prints `retries: 3` without manual concatenation of mixed types:
-
-```python
-print("retries: " + 3)
-```
-
-**C7.** Predict each printed line:
-
-```python
-print("a b  c".split())
-print("a b  c".split(" "))
-print("a,b,".split(","))
-print(",".join(["x", "y"]))
-print(",".join([]))
-```
-
-**C8.** Predict: `"a-b-c".replace("-", "_").replace("a", "A")`.
-
-**C9.** Given `s = "banana"`, predict all four: `s.find("an")`, `s.rfind("an")`, `s.index("an")`, `s.count("an")`.
-
-**C10.** Write `is_palindrome(text)` that ignores case and all non-alphanumeric characters. Example: `"A man, a plan, a canal: Panama"` returns `True`.
-
-**C11.** Predict each printed line and explain the difference between `str` and `repr`:
-
-```python
-print("a")
-print(repr("a"))
-print(["a", "b"])
-```
-
-**C12.** Predict each printed line and the length in the last line:
-
-```python
-print("a\nb")
-print(r"a\nb")
-print("""x
-y""")
-print(len("\t"))
-```
-
-**C13.** Write `normalize(text)` that trims the ends and collapses any run of whitespace (spaces, tabs, newlines) into a single space, using `split()` and `join`. Example: `normalize("  a \t b\n c ")` returns `"a b c"`.
-
-**C14.** Given `total = 1234.5678`, predict `f"{total:,.2f}"`. Then write an expression producing `75%` from the float `0.75` using a format spec, not string concatenation.
-
-**C15.** Predict: `"an" in "banana"`, `"x" in "banana"`, `"b" in ["b"]`, `"ab" in "abc"`.
-
-**C16.** Predict each result: `"xxabcxx".strip("x")`, `"xxabcxx".lstrip("x")`, `"xxabcxx".rstrip("x")`, `"abc".center(7, "-")`.
-
-**C17.** Write `initials(full_name)` turning `"ada lovelace"` into `"A.L."` (uppercase initial and dot for each word, split on whitespace).
-
-**C18.** Given a list of raw CSV lines, write an expression that splits each line on commas and strips each field:
-
-```python
-lines = ["a, b ,c", "1,2, 3"]
-```
-
-## Group D — Booleans, `None`, and truthiness
-
-**D1.** Classify each as truthy or falsy: `0`, `"0"`, `[]`, `[0]`, `""`, `" "`, `None`, `{}`, `set()`, `-1`, `0.0`, `range(0)`.
-
-**D2.** Predict each: `bool(0.1)`, `bool("False")`, `bool([[]])`, `bool(range(1))`, `bool(None)`, `bool(-0.0)`.
-
-**D3.** Predict the output for `name = ""` and then for `name = 0`, and explain the difference between the two checks:
-
-```python
-if name is None:
-    print("None branch")
-if not name:
-    print("falsy branch")
-```
-
-**D4.** Predict all five lines:
-
-```python
-print(3 and 4)
-print(0 and 4)
-print(3 or 4)
-print(0 or 4)
-print([] or {} or "x")
-```
-
-**D5.** This default-value idiom is wrong when `port = 0` is a valid setting. Explain what happens and rewrite it correctly:
-
-```python
-port = settings.get("port") or 8080
-```
-
-**D6.** Write `display_name(user)` returning the user's `"name"` when it is a non-empty string, and `"anonymous"` otherwise. The name may be missing (use `None`), `""`, or a valid string.
-
-**D7.** Predict all four printed values:
-
-```python
-x = None
-print(x == None)
-print(x is None)
-print(x == False)
-print(bool(x))
-```
-
-**D8.** Predict each printed line:
-
-```python
-score = 55
-print("pass" if score >= 60 else "fail")
-x = 0
-print("zero" if not x else "nonzero")
-```
-
-**D9.** Write `is_valid(payload)` returning `True` only when `payload` is a non-empty dict whose `"id"` key exists and is a non-zero integer. No exceptions should escape the function.
-
-## Group E — Lists
-
-**E1.** Predict the output:
-
-```python
-a = [1, 2]
-a.append([3, 4])
-b = [1, 2]
-b.extend([3, 4])
-print(a, b)
-```
-
-**E2.** Predict each output (note the last line uses `xs.index(3)`):
-
-```python
-xs = [1, 2, 3, 2]
-xs.remove(2)
-print(xs)
-print(xs.pop())
-print(xs)
-print(xs.index(3))
-```
-
-**E3.** Predict both printed lines and explain the `None`:
-
-```python
-xs = [3, 1, 2]
-ys = xs.sort()
-print(xs, ys)
-zs = sorted(xs)
-print(xs, zs)
-```
-
-**E4.** Predict both outputs and explain why they differ:
-
-```python
-a = [[0]] * 2
-b = [[0] for _ in range(2)]
-a[0][0] = 5
-b[0][0] = 5
-print(a, b)
-```
-
-**E5.** Given `xs = [0, 1, 2, 3, 4, 5]`, predict each: `xs[1:4]`, `xs[-2:]`, `xs[:2]`, `xs[::2]`, `xs[1::2]`, `xs[5:1]`, `xs[5:1:-1]`.
-
-**E6.** Predict each output:
-
-```python
-xs = [1, 2, 3, 4]
-xs[1:3] = [9]
-print(xs, len(xs))
-xs[0:2] = []
-print(xs)
-```
-
-**E7.** For `xs = ["a", "b", "c", "d"]`, predict the result of `del xs[0]`, then `del xs[1:3]` applied to the result.
-
-**E8.** Predict the outputs and say which names alias each other:
-
-```python
-xs = [1, 2, 3]
-ys = xs
-zs = xs[:]
-ys.append(4)
-zs.append(5)
-print(xs, ys, zs)
-print(xs is ys, xs is zs, xs == zs)
-```
-
-**E9.** Predict each: `2 in [1, 2, 3]`, `[1, 2] in [[1, 2], [3]]`, `[1, 2] == [1, 2, 3]`, `[1, [2]] == [1, [2]]`.
-
-**E10.** Write `remove_duplicates(xs)` returning a new list with duplicates removed, preserving first-occurrence order. Do not mutate the input.
-
-**E11.** Write `flatten(matrix)` turning `[[1, 2], [3], []]` into `[1, 2, 3]`.
-
-**E12.** Predict each output:
-
-```python
-print(sum([1, 2, 3]), min("bca"), max([1, 5, 3]))
-words = ["bb", "a", "ccc"]
-print(sorted(words, key=len, reverse=True))
-```
-
-**E13.** The code below tries to remove all even numbers but leaves one behind. Explain the mechanism and fix it:
-
-```python
-nums = [1, 2, 2, 3]
-for n in nums:
-    if n % 2 == 0:
-        nums.remove(n)
-print(nums)
-```
-
-**E14.** Given `names = ["Ada", "Grace", "Alan"]`, write a single expression producing `[3, 5, 4]`.
-
-**E15.** Predict: `list(range(5))`, `list(range(2, 5))`, `list("ab")`, `[0] * 3`, `[] + [1]`.
-
-**E16.** Predict the output and explain:
-
-```python
-a = [1, 2]
-b = a * 2
-a.append(3)
-print(b, a)
-```
-
-**E17.** Write `second_largest(xs)` returning the second largest distinct value or `None` for lists with fewer than two distinct values. Examples: `[3, 1, 4, 4]` returns `3`; `[5, 5]` returns `None`.
-
-## Group F — Tuples and unpacking
-
-**F1.** For each expression, state whether the result is a tuple and why: `1,`, `(1)`, `(1,)`, `()`, `tuple("ab")`, `(1, 2)[0:1]`.
-
-**F2.** Predict each output:
-
-```python
-t = (1, 2, 3)
-a, b, c = t
-print(a, b, c)
-x, *rest = t
-print(x, rest)
-```
-
-**F3.** Predict both printed lines:
-
-```python
-first, *middle, last = [1, 2, 3, 4, 5]
-print(first, middle, last)
-*x, = [1, 2]
-print(x)
-```
-
-**F4.** Predict the output and name the idiom in use:
-
-```python
-a, b = 1, 2
-b, a = a, b
-print(a, b)
-```
-
-**F5.** Identify which statements raise and which succeed, and explain the last two:
-
-```python
-t = (1, 2, 3)
-t[0] = 9
-t = t + (4,)
-t += (5,)
-```
-
-**F6.** Which of these are valid dictionary keys and why: `(1, 2)`, `(1, [2])`, `frozenset({1})`, `[1]`, `(1, (2, 3))`?
-
-**F7.** Given `people = [("Ada", 36), ("Grace", 45)]`, write a loop printing `1 Ada 36` and `2 Grace 45` using `enumerate` and tuple unpacking in the header.
-
-**F8.** Predict the output and explain what `zip(*rows)` does:
-
-```python
-rows = [(1, "a"), (2, "b")]
-columns = list(zip(*rows))
-print(columns)
-```
-
-**F9.** Write `min_max(xs)` that returns a tuple `(smallest, largest)` and show, in two lines of caller code, how to unpack the result.
-
-**F10.** Explain the exact error raised by `a, b = [1, 2, 3]` and by `a, b, c = [1, 2]`.
-
-**F11.** Rewrite this loop to unpack `item` directly in the `for` header:
-
-```python
-for item in [("a", 1), ("b", 2)]:
-    name = item[0]
-    value = item[1]
-```
-
-**F12.** Write a single assignment statement that rotates three variables so that after `a, b, c = 1, 2, 3` they become `3, 1, 2`.
-
-**F13.** Predict the output:
-
-```python
-data = {"a": 1, "b": 2}
-for index, (key, value) in enumerate(data.items(), start=1):
-    print(index, key, value)
-```
-
-## Group G — Dictionaries
-
-**G1.** Predict each printed value:
-
-```python
-d = {"a": 1}
-d["b"] = 2
-print(d.get("c"))
-print(d.get("c", 0))
-print(d.get("a"))
-print(len(d))
-```
-
-**G2.** Given `config = {}`, state which line raises, and the final value of `config` if the raising line is removed:
-
-```python
-config["timeout"] = config.get("timeout", 30)
-value = config.setdefault("retries", 3)
-value = config["missing"]
-```
-
-**G3.** Write `word_counts(words)` returning a dict of counts for the list `["b", "a", "b", "c", "b"]`, using `get`.
-
-**G4.** Predict the exact output order:
-
-```python
-d = {"x": 1, "y": 2}
-for k in d:
-    print(k)
-for v in d.values():
-    print(v)
-for k, v in d.items():
-    print(k, v)
-```
-
-**G5.** Predict all three printed dicts:
-
-```python
-a = {"x": 1, "y": 2}
-b = {"y": 20, "z": 30}
-print({**a, **b})
-print(a | b)
-c = dict(a)
-c.update(b)
-print(c)
-```
-
-**G6.** Predict the resulting dict: `{1: "a", True: "b", 1.0: "c"}`. Explain the collisions.
-
-**G7.** Given:
-
-```python
-response = {"data": {"items": [{"id": 1}, {"id": 2}]}}
-```
-
-write one expression that extracts the id of the second item, and one expression that uses `get` to return `None` instead of raising when `"data"` or `"items"` are missing. (Nested `get` chains are fine.)
-
-**G8.** Write a dict comprehension that inverts `{"a": 1, "b": 2}` into `{1: "a", 2: "b"}`. State what happens if two keys share a value.
-
-**G9.** Predict each: `"a" in {"a": 1}`, `1 in {"a": 1}`, `"a" in {"a": 1}.keys()`, `1 in {"a": 1}.values()`.
-
-**G10.** Given records shaped `{"id": 1, "team": "blue"}`, write code using `setdefault` to build `{"blue": [1, 3], "red": [2]}` from `[{"id": 1, "team": "blue"}, {"id": 2, "team": "red"}, {"id": 3, "team": "blue"}]`.
-
-**G11.** Write `top_words(text, n=3)` returning the `n` most frequent words from a whitespace-split text, sorted by count descending and then alphabetically for ties. Return a list of `(word, count)` tuples.
-
-**G12.** Predict the output: `list(dict.fromkeys(["b", "a", "b", "c", "a"]))`. Explain how this preserves order while deduplicating.
-
-**G13.** Predict both printed lines:
-
-```python
-d = {"a": 1, "b": 2}
-print(d.pop("a"), d)
-print(d.pop("z", None), d)
-```
-
-**G14.** Predict: `dict([("a", 1), ("b", 2)])` and `dict(a=1, b=2)`.
-
-**G15.** Predict and explain: `{"a": 1, "b": 2} == {"b": 2, "a": 1}`.
-
-**G16.** Write `merge_defaults(defaults, overrides)` returning a new dict where `overrides` wins on conflicts, without mutating either input.
-
-**G17.** Write `required_missing(payload, required)` that returns a sorted list of required keys absent from `payload`. Example: `required_missing({"a": 1}, ["a", "b", "c"])` returns `["b", "c"]`.
-
-## Group H — Sets
-
-**H1.** State what each literal or call produces: `{}`, `set()`, `{1, 2, 2}`, `set("mississippi")`, `set([1, 1, 2]) == {1, 2}`.
-
-**H2.** Predict each, using `sorted(...)` to make the output deterministic:
-
-```python
-a = {1, 2, 3}
-b = {2, 3, 4}
-print(sorted(a | b))
-print(sorted(a & b))
-print(sorted(a - b))
-print(sorted(a ^ b))
-```
-
-**H3.** For each statement on `s = {1, 2}`, state whether it raises or silently does nothing: `s.add(3)`, `s.discard(9)`, `s.remove(9)`, `s.pop()`, `s.clear()`.
-
-**H4.** Explain why checking `x in large_collection` is faster for a set than for a list, and rewrite this loop to use a set:
-
-```python
-seen = []
-for item in stream:
-    if item not in seen:
-        seen.append(item)
-        process(item)
-```
-
-**H5.** Explain the exact error raised by `{1, 2, 3}[0]` and the correct way to get an arbitrary element.
-
-**H6.** State the error raised by `{1, [2, 3]}` and give two different fixes that keep the "collection of items" meaning.
-
-**H7.** Predict: `{1, 2} <= {1, 2, 3}`, `{1, 2, 3} >= {1, 2}`, `{1, 2} < {1, 2}`, `{1, 2} < {1, 2, 3}`.
-
-**H8.** Write `changed_ids(old_ids, new_ids)` returning the set of ids that were added or removed between two collections of ids, in one expression using a set operator.
-
-**H9.** Deduplicate `["b", "a", "b", "c"]` two ways: once with a set (losing order) and once preserving order. Explain when each is acceptable.
-
-**H10.** Explain why `frozenset({"read", "write"})` can be used as a dict key while `{"read", "write"}` cannot, and write three lines that use a frozenset key in a dict.
-
-**H11.** Predict each: `2 in {1, 2}`, `2 in {1: "b"}`, `"a" in {"a": 1}`, `[1] in {1, 2}`.
-
-**H12.** Given two lists of tags, `old_tags` and `new_tags`, write code producing (a) tags present in both, (b) tags only in `new_tags`, (c) all tags, deduplicated. Use set operations and return sorted lists for deterministic output.
-
-## Group I — Conditionals and loops
-
-**I1.** Predict the exact output lines:
-
-```python
-x = 5
-if x > 0:
-    print("pos")
-    if x > 10:
-        print("big")
-    print("done")
-print("end")
-```
-
-**I2.** Predict the exact output:
-
-```python
-for n in [2, 4, 6]:
-    if n % 2:
-        break
-else:
-    print("all even")
-
-for n in [2, 3, 4]:
-    if n % 2:
-        break
-else:
-    print("all even")
-print("done")
-```
-
-**I3.** Predict each: `list(range(4))`, `list(range(2, 8, 2))`, `list(range(5, 0, -1))`, `list(range(0))`.
-
-**I4.** Predict the output:
-
-```python
-for i, ch in enumerate("abc", start=10):
-    print(i, ch)
-```
-
-**I5.** Predict the output and explain the truncation:
-
-```python
-print(list(zip([1, 2, 3], "ab")))
-```
-
-**I6.** Predict the value of `i` printed at the end and the total number of iterations:
-
-```python
-i = 0
-total = 0
-while i < 5:
-    i += 1
-    if i % 2 == 0:
-        continue
-    total += i
-print(total, i)
-```
-
-**I7.** Predict the full output:
-
-```python
-for i in range(2):
-    for j in range(2):
-        print(i, j)
-```
-
-**I8.** Predict the output and explain why it works even though Python has no block scope:
-
-```python
-for i in range(3):
-    pass
-print(i)
-```
-
-**I9.** Predict each boolean: `5 < 10 < 15`, `5 < 10 > 3`, `1 == 1.0 < 2`, `10 < 5 < 15`, `1 < 2 < "a"`.
-
-**I10.** Predict each: `any(x > 3 for x in [1, 2])`, `all(x > 0 for x in [1, 2])`, `all([])`, `any([])`.
-
-**I11.** Rewrite this loop idiomatically without index arithmetic:
-
-```python
-xs = ["a", "b", "c"]
-for i in range(len(xs)):
-    print(i, xs[i])
-```
-
-**I12.** Predict each call result (Python 3.10+):
-
-```python
-def handle(code):
-    match code:
-        case 200:
-            return "ok"
-        case 404 | 410:
-            return "gone"
-        case _:
-            return "other"
-
-print(handle(200), handle(410), handle(500))
-```
-
-**I13.** Write `first_negative(xs)` returning the first negative number found, or `None` if there is none. Then write a second version using a `for ... else` that reports `"none found"` inside the loop construct itself.
-
-**I14.** Write `classify_status(code)` where 100–199 returns `"info"`, 200–299 `"success"`, 300–399 `"redirect"`, 400–499 `"client_error"`, 500–599 `"server_error"`, and anything else `"unknown"`. Use chained comparisons.
-
-**I15.** In nested loops, what does `break` inside the inner loop actually exit? Write a two-loop example that breaks out of both loops using a flag or a function return.
-
-**I16.** Predict each printed line:
-
-```python
-x = 5
-print("small" if x < 10 else "big")
-items = []
-print("empty" if not items else "full")
-```
-
-**I17.** Identify every error in this snippet (there are at least two) and rewrite it so it prints `1` through `3`:
-
-```python
-for i in range(1, 4)
-print(i)
-```
-
-**I18.** Trace this loop and give the exact sequence of printed values:
-
-```python
-i = 3
-while i:
-    print(i)
-    i -= 1
-```
-
-**I19.** Write a retry loop skeleton: `attempts` starts at 0; call `fetch()` at most 3 times; stop early if it returns a truthy result; after the loop, return the result or `None`. Use `while`, `break`, and truthiness.
-
-## Group J — Comprehensions
-
-**J1.** Predict the output: `[x * 2 for x in [1, 2, 3]]`.
-
-**J2.** Predict the output: `[x for x in [4, -1, 5, -2] if x > 0]`.
-
-**J3.** Predict both outputs:
-
-```python
-print([x if x > 0 else -x for x in [4, -1, 5, -2]])
-print([-x if x > 0 else x for x in [4, -1]])
-```
-
-**J4.** Given `keys = ["a", "b"]` and `values = [1, 2]`, write a dict comprehension producing `{"a": 1, "b": 2}`.
-
-**J5.** Predict the output: `sorted({len(w) for w in ["a", "bb", "c", "ddd"]})`.
-
-**J6.** Predict the output: `[n for row in [[1, 2], [3]] for n in row]`.
-
-**J7.** Predict the output: `[(x, y) for x in [1, 2] for y in ["a", "b"]]`. Then state how the nested loops would be written as a normal `for` loop.
-
-**J8.** Predict both printed lines and explain why the second is not `1`:
-
-```python
-x = "outer"
-print([x for x in range(2)])
-print(x)
-```
-
-**J9.** Rewrite this loop as a single comprehension:
-
-```python
-result = []
-for n in range(10):
-    if n % 3 == 0:
-        result.append(n * n)
-```
-
-**J10.** Given `lines = ["  Alpha ", "BETA", " gamma "]`, write a comprehension producing `["alpha", "beta", "gamma"]`.
-
-**J11.** Predict the output: `sum(x * x for x in range(4))`. Explain what is different between this and `sum([x * x for x in range(4)])`.
-
-**J12.** Identify the anti-pattern and rewrite it correctly:
-
-```python
-[print(x) for x in [1, 2, 3]]
-```
-
-**J13.** Given records `[{"id": 1, "name": "a", "active": True}, {"id": 2, "name": "b", "active": False}, {"id": 3, "name": "c", "active": True}]`, write one dict comprehension mapping `id` to `name` for active records only.
-
-**J14.** Predict the output: `[x * y for x in range(3) if x for y in range(2)]`.
-
-**J15.** Rewrite this as one comprehension:
-
-```python
-names = ["ada", "alan", "grace", "bob"]
-upper_long = []
-for name in names:
-    if len(name) > 3:
-        upper_long.append(name.upper())
-```
-
-**J16.** Write a comprehension that produces the uppercase first letters of words longer than three characters from `["api", "gateway", "ui", "cache"]`. Expected: `["A", "G", "C"]`.
-
-**J17.** Explain why this comprehension is a poor choice and rewrite it as a loop:
-
-```python
-logs = []
-[logs.extend(line.strip().split()) for line in ["a b", "c d"]]
-```
 
 ## Group K — Functions and arguments
 
@@ -1935,6 +1849,68 @@ print(f(b=1, a=2, c=3))
 ```
 
 **K20.** Write `filter_kwargs(data, allowed)` that returns a new dict containing only the keys present in the `allowed` container. Example: `filter_kwargs({"a": 1, "b": 2, "debug": True}, ["a", "b"])` returns `{"a": 1, "b": 2}`. Use a dict comprehension.
+## 14. Scope
+
+Python resolves names with the **LEGB** rule: **L**ocal, **E**nclosing function, **G**lobal (module), **B**uilt-in.
+
+There is no block scope. Unlike TypeScript's `let`/`const`, a name assigned inside `if`, `for`, or `while` belongs to the enclosing function or module:
+
+```python
+for i in range(3):
+    pass
+print(i)            # 2 -- still defined
+
+if condition:
+    temp = 1
+print(temp)         # works (if the branch ran)
+```
+
+That makes loop variables and temporaries leak, unlike TypeScript.
+
+### Reading versus assigning
+
+Reading a global from a function works. Assigning to a name anywhere in a function makes it local for the *entire* function, which causes `UnboundLocalError` when read before assignment:
+
+```python
+counter = 0
+
+def bump():
+    counter += 1        # UnboundLocalError: local variable 'counter'
+
+def bump():
+    global counter      # explicit; use sparingly
+    counter += 1
+```
+
+For closures, `nonlocal` reassigns a name in the nearest enclosing function scope:
+
+```python
+def make_counter():
+    count = 0
+    def increment():
+        nonlocal count
+        count += 1
+        return count
+    return increment
+```
+
+### Other scope facts
+
+- Builtins (`list`, `id`, `sum`, `dict`, ...) can be shadowed. `list = [1, 2]` breaks `list("ab")` for the rest of that scope. Never do this.
+- Comprehension variables have their own scope and do not leak: after `[x for x in range(3)]`, `x` is undefined unless it existed before.
+- Functions capture variables, not values. Lambdas created in a loop all see the final value:
+
+```python
+funcs = [lambda: i for i in range(3)]
+print([f() for f in funcs])   # [2, 2, 2]
+```
+
+- `del name` removes the binding from the current namespace; it does not destroy the object while other names reference it.
+- Module-level code runs top to bottom at import time; function bodies run only when called. (Modules and imports are covered in Chapter 2.)
+
+---
+
+
 
 ## Group L — Scope
 
@@ -2021,6 +1997,86 @@ print(outer()())
 **L11.** Write a counter two ways: once with `nonlocal`, and once with a single-element list as an accumulator (no `nonlocal`). Explain why the list version works.
 
 **L12.** Predict whether each statement raises and explain: accessing a local before assignment in the same function; reading a global in a function; reading a builtin after shadowing it in the same function.
+## 15. Idioms and common mistakes
+
+Idioms to adopt:
+
+- `if not xs:` / `if xs is None:` — pick the check that matches the meaning.
+- `enumerate`, `zip`, `items()` instead of index arithmetic.
+- `"".join(parts)` instead of repeated `+=` for strings.
+- `dict.get(key, default)` and `setdefault` for optional and grouped data.
+- Comprehensions instead of `map`/`filter` loops.
+- `a, b = b, a` swaps; star-unpacking for head/tail.
+- f-strings for all formatting.
+- `sorted(data, key=...)` instead of hand-written comparators.
+
+Mistakes to avoid:
+
+1. `xs = xs.sort()` — in-place methods return `None`.
+2. Mutable default arguments (`def f(x, acc=[])`).
+3. `[[0] * 3] * 3` — repeated aliases, not independent rows.
+4. Using `is` to compare values instead of `None`/sentinels.
+5. Expecting `/` to do integer division, or `%` to follow JavaScript sign rules.
+6. `"count: " + n` — no implicit string conversion.
+7. `{}` for an empty set; it is an empty dict.
+8. Mutating a list while iterating over it.
+9. Assuming loop variables disappear after the loop.
+10. Trusting `and`/`or` to return booleans rather than operands.
+11. Assuming `if name:` when `""` is a valid value.
+12. Forgetting the comma in one-element tuples.
+13. `int("3.5")` instead of `int(float("3.5"))`.
+14. Shadowing builtins such as `list`, `id`, `str`, `sum`.
+15. Function calls where `return` was intended, or vice versa.
+
+---
+
+# Exercises
+
+Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, and reconcile.
+
+
+## Group N — Mixed realistic tasks
+
+These combine several chapter concepts. Keep implementations small and idiomatic. Do not use any imports beyond the standard library, and only what the chapter covered.
+
+**N1.** Write `parse_settings(text)` converting `"host=localhost;port=8080;debug=true"` into `{"host": "localhost", "port": 8080, "debug": True}`. The port must be an `int` and `debug` a `bool` (`"true"` means `True`, anything else `False`). Handle an empty string by returning `{}`.
+
+**N2.** Given `records = [{"id": 1, "status": "ok"}, {"id": 2, "status": "error"}, {"id": 3, "status": "ok"}]`, write code producing `{"ok": 2, "error": 1}`.
+
+**N3.** Write `chunk(items, size)` returning a list of lists, each of length `size` except possibly the last. Example: `chunk([1, 2, 3, 4, 5], 2)` returns `[[1, 2], [3, 4], [5]]`.
+
+**N4.** Write `effective_config(defaults, file_config, env_config)` where later dictionaries override earlier ones, returning a new dict and mutating none of the inputs. Show a call with `{"timeout": 10}`, `{"timeout": 30, "retries": 2}`, `{"retries": 5}`.
+
+**N5.** Given `lines = ["2026-01-01 GET /users 200", "2026-01-01 POST /users 500", "2026-01-02 GET /health 200"]`, extract the set of distinct status codes as integers.
+
+**N6.** Given a list of provider responses shaped `{"model": "m1", "usage": {"total_tokens": 120}}`, write code computing the total tokens across all responses. Some responses may be missing the `"usage"` key; treat those as zero without raising.
+
+**N7.** Write `validate_event(event)` returning a sorted list of problem strings. Rules: `"id"` must exist and be an `int`; `"name"` must exist and be a non-empty `str`; any other keys are ignored. An empty list means valid. Use `isinstance`, `in`, and truthiness checks.
+
+**N8.** Given `responses = [{"id": "r1", "ok": True}, {"id": "r2", "ok": False}, {"id": "r3", "ok": False}]`, produce a list of ids where `ok` is false.
+
+**N9.** Given `endpoints = ["/Users", "/health", "/users", "/HEALTH", "/metrics"]`, produce a deduplicated, case-insensitively sorted list. State whether you used a set or `dict.fromkeys` and why.
+
+**N10.** Write `has_pair(nums, target)` returning `True` when two distinct positions hold values summing to `target`. Use a set for O(n) average time. Example: `has_pair([2, 7, 11, 15], 9)` returns `True`.
+
+**N11.** Given `usage = [{"model": "m1", "tokens": 100}, {"model": "m2", "tokens": 50}, {"model": "m1", "tokens": 25}]`, compute `{"m1": 125, "m2": 50}`, then return the model with the highest total (alphabetical tie-break).
+
+**N12.** Given `tag_lists = [["API", "beta"], ["api"], ["Beta", "v2"]]`, produce a flattened, lowercased, order-preserving, deduplicated list: `["api", "beta", "v2"]`.
+
+**N13.** Given `requests = [{"endpoint": "/a", "ms": 10}, {"endpoint": "/b", "ms": 20}, {"endpoint": "/a", "ms": 30}]`, compute the average latency per endpoint as `{"/a": 20.0, "/b": 20.0}`. Use `setdefault` or `get` and a final comprehension.
+
+**N14.** Given prompt/response records `{"prompt": "...", "response": "...", "model": "m1"}`, write code producing a summary dict with `"count"`, `"total_chars"` (prompt plus response lengths), and `"models"` (a set of distinct model names).
+
+**N15.** Write `mask_secrets(env)` taking a dict of environment variables and returning a copy where any key containing `"TOKEN"`, `"SECRET"`, or `"PASSWORD"` (case-insensitive) has its value replaced with `"***"`. The original dict must be unchanged.
+
+**N16.** Write `summarize_status(codes)` taking a list of HTTP status codes and returning `(count, unique_count, has_error)` where `has_error` is `True` if any code is `>= 400`. Use builtins and a generator expression.
+
+**N17.** Write `dedupe_records(records, key)` that returns records deduplicated by the value of `key`, keeping the first occurrence, preserving order. Example: `dedupe_records([{"id": 1}, {"id": 1}, {"id": 2}], "id")` returns the first and third records.
+
+**N18.** A JSON-like payload arrives as `{"user": {"id": 7, "roles": ["admin"]}, "meta": None}`. Write `safe_username(payload)` returning the username safe-access pattern result: `payload["user"]["name"]` if everything exists and is a non-empty string, otherwise `"unknown"`. Do not use `try`/`except` (Chapter 2 topic); use `get`, truthiness, and `isinstance`.
+
+---
+
 
 ## Group M — Translating TypeScript patterns
 
@@ -2100,48 +2156,6 @@ const statuses = [200, 201, 404];
 const isOk = (code: number) => code === 200 || code === 201;
 console.log(statuses.includes(200), isOk(201));
 ```
-
-## Group N — Mixed realistic tasks
-
-These combine several chapter concepts. Keep implementations small and idiomatic. Do not use any imports beyond the standard library, and only what the chapter covered.
-
-**N1.** Write `parse_settings(text)` converting `"host=localhost;port=8080;debug=true"` into `{"host": "localhost", "port": 8080, "debug": True}`. The port must be an `int` and `debug` a `bool` (`"true"` means `True`, anything else `False`). Handle an empty string by returning `{}`.
-
-**N2.** Given `records = [{"id": 1, "status": "ok"}, {"id": 2, "status": "error"}, {"id": 3, "status": "ok"}]`, write code producing `{"ok": 2, "error": 1}`.
-
-**N3.** Write `chunk(items, size)` returning a list of lists, each of length `size` except possibly the last. Example: `chunk([1, 2, 3, 4, 5], 2)` returns `[[1, 2], [3, 4], [5]]`.
-
-**N4.** Write `effective_config(defaults, file_config, env_config)` where later dictionaries override earlier ones, returning a new dict and mutating none of the inputs. Show a call with `{"timeout": 10}`, `{"timeout": 30, "retries": 2}`, `{"retries": 5}`.
-
-**N5.** Given `lines = ["2026-01-01 GET /users 200", "2026-01-01 POST /users 500", "2026-01-02 GET /health 200"]`, extract the set of distinct status codes as integers.
-
-**N6.** Given a list of provider responses shaped `{"model": "m1", "usage": {"total_tokens": 120}}`, write code computing the total tokens across all responses. Some responses may be missing the `"usage"` key; treat those as zero without raising.
-
-**N7.** Write `validate_event(event)` returning a sorted list of problem strings. Rules: `"id"` must exist and be an `int`; `"name"` must exist and be a non-empty `str`; any other keys are ignored. An empty list means valid. Use `isinstance`, `in`, and truthiness checks.
-
-**N8.** Given `responses = [{"id": "r1", "ok": True}, {"id": "r2", "ok": False}, {"id": "r3", "ok": False}]`, produce a list of ids where `ok` is false.
-
-**N9.** Given `endpoints = ["/Users", "/health", "/users", "/HEALTH", "/metrics"]`, produce a deduplicated, case-insensitively sorted list. State whether you used a set or `dict.fromkeys` and why.
-
-**N10.** Write `has_pair(nums, target)` returning `True` when two distinct positions hold values summing to `target`. Use a set for O(n) average time. Example: `has_pair([2, 7, 11, 15], 9)` returns `True`.
-
-**N11.** Given `usage = [{"model": "m1", "tokens": 100}, {"model": "m2", "tokens": 50}, {"model": "m1", "tokens": 25}]`, compute `{"m1": 125, "m2": 50}`, then return the model with the highest total (alphabetical tie-break).
-
-**N12.** Given `tag_lists = [["API", "beta"], ["api"], ["Beta", "v2"]]`, produce a flattened, lowercased, order-preserving, deduplicated list: `["api", "beta", "v2"]`.
-
-**N13.** Given `requests = [{"endpoint": "/a", "ms": 10}, {"endpoint": "/b", "ms": 20}, {"endpoint": "/a", "ms": 30}]`, compute the average latency per endpoint as `{"/a": 20.0, "/b": 20.0}`. Use `setdefault` or `get` and a final comprehension.
-
-**N14.** Given prompt/response records `{"prompt": "...", "response": "...", "model": "m1"}`, write code producing a summary dict with `"count"`, `"total_chars"` (prompt plus response lengths), and `"models"` (a set of distinct model names).
-
-**N15.** Write `mask_secrets(env)` taking a dict of environment variables and returning a copy where any key containing `"TOKEN"`, `"SECRET"`, or `"PASSWORD"` (case-insensitive) has its value replaced with `"***"`. The original dict must be unchanged.
-
-**N16.** Write `summarize_status(codes)` taking a list of HTTP status codes and returning `(count, unique_count, has_error)` where `has_error` is `True` if any code is `>= 400`. Use builtins and a generator expression.
-
-**N17.** Write `dedupe_records(records, key)` that returns records deduplicated by the value of `key`, keeping the first occurrence, preserving order. Example: `dedupe_records([{"id": 1}, {"id": 1}, {"id": 2}], "id")` returns the first and third records.
-
-**N18.** A JSON-like payload arrives as `{"user": {"id": 7, "roles": ["admin"]}, "meta": None}`. Write `safe_username(payload)` returning the username safe-access pattern result: `payload["user"]["name"]` if everything exists and is a non-empty string, otherwise `"unknown"`. Do not use `try`/`except` (Chapter 2 topic); use `get`, truthiness, and `isinstance`.
-
----
 
 ## Before moving on
 
