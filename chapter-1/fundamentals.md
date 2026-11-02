@@ -78,281 +78,274 @@ Everyday conventions:
 
 ---
 
+## 2. Numbers
 
+Two everyday numeric types:
 
-## Group E — Lists
-
-**E1.** Predict the output:
-
-```python
-a = [1, 2]
-a.append([3, 4])
-b = [1, 2]
-b.extend([3, 4])
-print(a, b)
-```
-
-**E2.** Predict each output (note the last line uses `xs.index(3)`):
+- `int` — arbitrary precision. There is no 32/64-bit overflow.
+- `float` — IEEE 754 double precision, like JavaScript numbers.
 
 ```python
-xs = [1, 2, 3, 2]
-xs.remove(2)
-print(xs)
-print(xs.pop())
-print(xs)
-print(xs.index(3))
+big = 2 ** 100             # 1267650600228229401496703205376
+print(type(10), type(10.0))  # <class 'int'> <class 'float'>
 ```
 
-**E3.** Predict both printed lines and explain the `None`:
+### Operators that differ from TypeScript
 
 ```python
-xs = [3, 1, 2]
-ys = xs.sort()
-print(xs, ys)
-zs = sorted(xs)
-print(xs, zs)
+print(7 / 2)      # 3.5   -- / ALWAYS produces a float
+print(7 // 2)     # 3     -- floor division
+print(7 % 2)      # 1
+print(2 ** 10)    # 1024  -- ** is exponentiation, ^ is NOT
 ```
 
-**E4.** Predict both outputs and explain why they differ:
+Floor division and modulo round toward negative infinity, not toward zero:
 
 ```python
-a = [[0]] * 2
-b = [[0] for _ in range(2)]
-a[0][0] = 5
-b[0][0] = 5
-print(a, b)
+print(-7 // 2)    # -4
+print(-7 % 2)     # 1     (result has the sign of the divisor)
+print(-7 // -2)   # 3
+print(-7 % -2)    # -1
 ```
 
-**E5.** Given `xs = [0, 1, 2, 3, 4, 5]`, predict each: `xs[1:4]`, `xs[-2:]`, `xs[:2]`, `xs[::2]`, `xs[1::2]`, `xs[5:1]`, `xs[5:1:-1]`.
+JavaScript's `Math.floor(-7 / 2)` is `-4`, matching `//`. JavaScript's `%` returns `-1` for `-7 % 2`, which does not match Python.
 
-**E6.** Predict each output:
+### Conversions and pitfalls
 
 ```python
-xs = [1, 2, 3, 4]
-xs[1:3] = [9]
-print(xs, len(xs))
-xs[0:2] = []
-print(xs)
+int("42")       # 42
+int("3.9")      # ValueError -- not a valid integer literal
+int(3.9)        # 3    -- truncates toward zero
+int(-3.9)       # -3
+int("ff", 16)   # 255  -- optional base
+float("2.5")    # 2.5
+float("nan")    # nan
+float("inf")    # inf
+str(2.5)        # "2.5"
 ```
 
-**E7.** For `xs = ["a", "b", "c", "d"]`, predict the result of `del xs[0]`, then `del xs[1:3]` applied to the result.
-
-**E8.** Predict the outputs and say which names alias each other:
+`round` uses banker's rounding (round half to even):
 
 ```python
-xs = [1, 2, 3]
-ys = xs
-zs = xs[:]
-ys.append(4)
-zs.append(5)
-print(xs, ys, zs)
-print(xs is ys, xs is zs, xs == zs)
+round(0.5)      # 0
+round(1.5)      # 2
+round(2.5)      # 2
+round(2.675, 2) # 2.67  -- binary representation strikes again
 ```
 
-**E9.** Predict each: `2 in [1, 2, 3]`, `[1, 2] in [[1, 2], [3]]`, `[1, 2] == [1, 2, 3]`, `[1, [2]] == [1, [2]]`.
-
-**E10.** Write `remove_duplicates(xs)` returning a new list with duplicates removed, preserving first-occurrence order. Do not mutate the input.
-
-**E11.** Write `flatten(matrix)` turning `[[1, 2], [3], []]` into `[1, 2, 3]`.
-
-**E12.** Predict each output:
+Floating point behaves exactly as in JavaScript; compare with `math.isclose` when needed:
 
 ```python
-print(sum([1, 2, 3]), min("bca"), max([1, 5, 3]))
-words = ["bb", "a", "ccc"]
-print(sorted(words, key=len, reverse=True))
+import math
+print(0.1 + 0.2)                    # 0.30000000000000004
+print(0.1 + 0.2 == 0.3)             # False
+print(math.isclose(0.1 + 0.2, 0.3)) # True
 ```
 
-**E13.** The code below tries to remove all even numbers but leaves one behind. Explain the mechanism and fix it:
+Also useful: `abs`, `divmod(a, b)` (returns `(a // b, a % b)`), `min`, `max`, `sum`, `pow`, and the `math` module. Numeric literals may use underscores (`1_000_000`) and bases (`0b1010`, `0o17`, `0x1F`).
 
-```python
-nums = [1, 2, 2, 3]
-for n in nums:
-    if n % 2 == 0:
-        nums.remove(n)
-print(nums)
-```
-
-**E14.** Given `names = ["Ada", "Grace", "Alan"]`, write a single expression producing `[3, 5, 4]`.
-
-**E15.** Predict: `list(range(5))`, `list(range(2, 5))`, `list("ab")`, `[0] * 3`, `[] + [1]`.
-
-**E16.** Predict the output and explain:
-
-```python
-a = [1, 2]
-b = a * 2
-a.append(3)
-print(b, a)
-```
-
-**E17.** Write `second_largest(xs)` returning the second largest distinct value or `None` for lists with fewer than two distinct values. Examples: `[3, 1, 4, 4]` returns `3`; `[5, 5]` returns `None`.
-## 7. Tuples
-
-Tuples are immutable sequences, typically used for fixed-shape records and multiple return values.
-
-```python
-point = (3, 4)
-x, y = point          # unpacking
-print(point[0], len(point))
-
-single = (1)          # this is just the int 1!
-single = (1,)         # one-element tuple needs a trailing comma
-empty = ()
-
-nested = (1, (2, 3))
-nested[1][1]          # 3
-nested[0] = 9         # TypeError: tuples do not support item assignment
-```
-
-Facts worth knowing:
-
-- Tuples support concatenation (`(1, 2) + (3,)`) and repetition, and slices return new tuples.
-- Tuples are hashable when all their elements are hashable, so they can be dictionary keys or set members. Lists cannot.
-- "Immutable" is shallow: `t = (1, [2])` forbids `t[1] = ...` but `t[1].append(3)` works.
-- A trailing comma creates a tuple in unpacking contexts too: `a, = [1]` binds `a = 1`.
-- `sorted(tup)` returns a *list*.
-
-Choosing between list and tuple: use a list for homogeneous, growable sequences; use a tuple for fixed sets of fields (coordinates, `(status, body)` pairs) and when you need hashability.
+Booleans are numbers: `True == 1` and `True + True == 2`. Never use this for arithmetic in application code, but expect to encounter it in code that sums flags.
 
 ---
 
+## 3. Strings
 
+Strings are **immutable sequences of Unicode code points**.
 
+```python
+s = "hello"
+s2 = 'single quotes work too'
+s3 = """triple quotes
+span multiple lines"""
+raw = r"C:\new\folder"     # backslashes are literal
+```
 
-## Group A — Names, aliasing, identity, and mutability
+No method ever mutates a string; every "modifying" method returns a new one.
 
-**A1.** Predict the output:
+### Indexing and slicing
+
+```python
+s = "python"
+print(s[0])      # p
+print(s[-1])     # n
+print(s[1:4])    # yth      (end index is exclusive)
+print(s[:3])     # pyt
+print(s[3:])     # hon
+print(s[::2])    # pto
+print(s[::-1])   # nohtyp
+```
+
+Key differences from JavaScript and TypeScript:
+
+- Negative indexes are normal and legal (`s[-1]`), unlike JS arrays.
+- `s[2:100]` does *not* error on an out-of-range end; it returns `"thon"`.
+- `s[100]` *does* raise `IndexError`.
+- Slices copy: `t = s[1:3]` is a new string object.
+
+### f-strings and formatting
+
+```python
+name = "Ada"
+score = 91.2567
+
+print(f"{name} scored {score:.1f}")      # Ada scored 91.3
+print(f"{1234567:,}")                    # 1,234,567
+print(f"{42:05d}")                       # 00042
+print(f"{0.75:.0%}")                     # 75%
+print(f"{name!r}")                       # 'Ada'
+print(f"{score=}")                       # score=91.2567
+```
+
+`f"{x=}"` (Python 3.8+) prints the expression text and its value — handy for debugging.
+
+### Common string operations
+
+```python
+s = "  Hello, World  "
+s.strip()                 # "Hello, World"
+s.strip().lower()         # "hello, world"
+s.strip().split(", ")     # ["Hello", "World"]
+",".join(["a", "b"])      # "a,b"
+"hello".replace("l", "L") # "heLLo"
+"hello".startswith("he")  # True
+"hello".find("z")         # -1    (index() raises ValueError instead)
+"hello".count("l")        # 2
+"ell" in "hello"          # True
+len("hello")              # 5
+```
+
+Details worth remembering:
+
+- `"".join(parts)` is the idiomatic way to concatenate many strings. Joining non-strings raises `TypeError`.
+- `text.split()` with no arguments splits on runs of whitespace and removes empty strings; `text.split(" ")` does not.
+- `"abc" + 1` raises `TypeError`. You must convert explicitly: `"abc" + str(1)`.
+- `"-" * 3` is `"---"`; multiplying a string by an int repeats it.
+- `str()` and `repr()` differ: `str("a")` is `a`, `repr("a")` is `'a'`. `print` uses `str`; containers display their elements with `repr`.
+- String comparison is by code point: `"Z" < "a"` is `True`.
+- Text is Unicode; converting to bytes uses `s.encode("utf-8")` and `b.decode("utf-8")`. You will need this when working with files and HTTP (Chapters 3 and 5).
+
+---
+
+## 4. Booleans, `None`, and truthiness
+
+Booleans are capitalized: `True` and `False` (TypeScript's `true`/`false` do not exist). The null-like value is `None`.
+
+Python has a general notion of **truthiness**. These values are falsy:
+
+- `None`
+- `False`
+- `0`, `0.0`, `0j`
+- `""` (empty string)
+- `[]`, `()`, `{}`, `set()` (empty containers)
+
+Everything else is truthy, including `"0"`, `"False"`, `[0]`, and `" "`.
+
+```python
+if []:
+    print("never runs")
+if "False":
+    print("runs, because non-empty strings are truthy")
+```
+
+Boolean operators return **operands**, not booleans:
+
+```python
+print(0 or "default")     # default
+print("a" and "b")        # b
+print("" or 0 or [])      # []     -- all falsy; returns the last one
+print("a" and "" and 5)   # ""     -- short-circuits at the first falsy
+```
+
+This powers the default-value idiom, which has a trap with falsy-but-valid values:
+
+```python
+name = supplied or "anonymous"   # "" and 0 are replaced too!
+```
+
+The safe version when `""` or `0` are valid inputs:
+
+```python
+name = supplied if supplied is not None else "anonymous"
+```
+
+Comparison operators (`==`, `<`, `>=`, `!=`, `in`, `is`) produce actual booleans, which is why the distinction above matters.
+
+`None` checks use `is`, never `==`:
+
+```python
+result = None
+if result is None:
+    print("no result")
+```
+
+Functions that fall off the end return `None`. `print()` also returns `None` — a classic source of `x = print(...)` bugs.
+
+The conditional expression is written in the opposite order from TypeScript:
+
+```python
+status = "ok" if score >= 60 else "fail"
+```
+
+There is no `??` or `?.` operator. Use explicit `is None` checks or `dict.get`.
+
+---
+
+## 5. Identity and equality
+
+Two operators that TypeScript does not separate:
+
+- `==` — **equality**: calls `__eq__`; same value.
+- `is` — **identity**: same object (`id(a) == id(b)`).
 
 ```python
 a = [1, 2]
-b = a
-c = a[:]
-b.append(3)
-c.append(4)
-print(a, c)
-```
-
-**A2.** Predict the output:
-
-```python
-x = {"n": 1}
-y = x
-x["n"] = 2
-y = {"n": 3}
-print(x, y)
-```
-
-**A3.** Predict the output and explain why `xs` ends as it does:
-
-```python
-def add_item(items, item):
-    items.append(item)
-
-def replace(items):
-    items = []
-
-xs = [1]
-add_item(xs, 2)
-replace(xs)
-print(xs)
-```
-
-**A4.** The following code was meant to copy `original` so that mutating `copy` leaves `original` untouched, but it has a bug. Identify the bug and give two different fixes:
-
-```python
-original = [1, 2, 3]
-copy = original
-copy.append(4)
-print(original)
-```
-
-**A5.** For each pair, state whether `a is b`, `a == b`, both, or neither is `True`, and explain:
-
-```python
-a = [1, 2, 3]
-b = [1, 2, 3]
-```
-
-```python
-a = (1, 2)
-b = a
-```
-
-```python
-a = "hello"
-b = "hello"
-```
-
-**A6.** Predict the output:
-
-```python
-a = [1, 2, 3]
-b = a
-b = b + [4]
-b += [5]
-print(a, b)
-```
-
-**A7.** Predict both outputs:
-
-```python
-import copy
-
-a = [[1], [2]]
-b = a[:]
-c = copy.deepcopy(a)
-b[0].append(9)
-b.append([3])
-print(a)
-print(c)
-```
-
-**A8.** When run in a REPL, `a = 1000; b = 1000; a is b` may print `False`, yet `a = 256; b = 256; a is b` prints `True`. Explain both results and state the rule you should follow in your own code.
-
-**A9.** Predict the four printed booleans:
-
-```python
-a = [1]
-b = [1]
+b = [1, 2]
 c = a
-print(a is b, a is c, a == b, a == c)
+print(a == b)   # True  (equal contents)
+print(a is b)   # False (different objects)
+print(a is c)   # True  (same object)
+print(a == c)   # True
 ```
 
-**A10.** For each type, state whether values are mutable and whether the type is hashable: `int`, `str`, `list`, `tuple`, `dict`, `set`, `frozenset`, `bool`, `None`.
+Rules of thumb:
 
-**A11.** Fill in the blank four different ways such that `b` is a copy that can be mutated independently of `a` (shallow copies are acceptable unless stated otherwise):
+- Use `is` only with `None` and sentinel objects: `x is None`, `x is not None`.
+- Use `==` for everything else.
+- Do not use `is` to compare numbers or strings. CPython caches small ints (`-5..256`) and interns some strings, so `x is y` for equal values can be `True` or `False` depending on context. Never depend on it.
 
 ```python
-a = [[1, 2], [3, 4]]
-b = ______  # must not be "a"
+x = 256
+y = 256
+print(x is y)   # True in CPython -- an implementation detail, not a language rule
+
+x = 1000
+y = 1000
+print(x is y)   # may be True or False depending on how the code was compiled
 ```
 
-**A12.** One of the following statements succeeds and the other raises. Identify which is which, give the exact exception type, and explain the difference:
+Some equality facts that differ from JavaScript:
 
 ```python
-t = (1, [2, 3])
-t[1].append(4)
-t[0] = 9
+print(1 == 1.0)    # True   -- numeric comparison across types
+print(1 == True)   # True   -- bool is a subtype of int
+print(0 == False)  # True
+print("1" == 1)    # False  -- no coercion
 ```
 
-**A13.** Write a function `same_object(a, b)` that returns `True` when the two arguments are the same object, implemented (a) with `id()` and (b) with `is`. State which one you would actually use.
-
-**A14.** Predict the output:
+`is` also appears in chained form, as do all comparisons. A chained comparison evaluates each operand once and means "pairwise and":
 
 ```python
-a = 5
-b = a
-a += 1
-print(a, b)
+x = 5
+print(1 < x < 10)          # True
+print(10 < x < 20)         # False
+names = []
+print(names == [])         # True (prefer 'if not names:' instead)
 ```
 
-**A15.** Explain why this function does not modify the caller's list, then rewrite it so it does:
+NaN is never equal to itself: `float("nan") == float("nan")` is `False`. Detect with `math.isnan`.
 
-```python
-def clear_all(xs):
-    xs = []
-```
+---
+
 ## 6. Lists
 
 Lists are mutable, ordered, heterogeneous sequences — the Python workhorse for ordered collections.
@@ -443,82 +436,36 @@ Other useful facts:
 
 ---
 
+## 7. Tuples
 
-
-
-## Group F — Tuples and unpacking
-
-**F1.** For each expression, state whether the result is a tuple and why: `1,`, `(1)`, `(1,)`, `()`, `tuple("ab")`, `(1, 2)[0:1]`.
-
-**F2.** Predict each output:
+Tuples are immutable sequences, typically used for fixed-shape records and multiple return values.
 
 ```python
-t = (1, 2, 3)
-a, b, c = t
-print(a, b, c)
-x, *rest = t
-print(x, rest)
+point = (3, 4)
+x, y = point          # unpacking
+print(point[0], len(point))
+
+single = (1)          # this is just the int 1!
+single = (1,)         # one-element tuple needs a trailing comma
+empty = ()
+
+nested = (1, (2, 3))
+nested[1][1]          # 3
+nested[0] = 9         # TypeError: tuples do not support item assignment
 ```
 
-**F3.** Predict both printed lines:
+Facts worth knowing:
 
-```python
-first, *middle, last = [1, 2, 3, 4, 5]
-print(first, middle, last)
-*x, = [1, 2]
-print(x)
-```
+- Tuples support concatenation (`(1, 2) + (3,)`) and repetition, and slices return new tuples.
+- Tuples are hashable when all their elements are hashable, so they can be dictionary keys or set members. Lists cannot.
+- "Immutable" is shallow: `t = (1, [2])` forbids `t[1] = ...` but `t[1].append(3)` works.
+- A trailing comma creates a tuple in unpacking contexts too: `a, = [1]` binds `a = 1`.
+- `sorted(tup)` returns a *list*.
 
-**F4.** Predict the output and name the idiom in use:
+Choosing between list and tuple: use a list for homogeneous, growable sequences; use a tuple for fixed sets of fields (coordinates, `(status, body)` pairs) and when you need hashability.
 
-```python
-a, b = 1, 2
-b, a = a, b
-print(a, b)
-```
+---
 
-**F5.** Identify which statements raise and which succeed, and explain the last two:
-
-```python
-t = (1, 2, 3)
-t[0] = 9
-t = t + (4,)
-t += (5,)
-```
-
-**F6.** Which of these are valid dictionary keys and why: `(1, 2)`, `(1, [2])`, `frozenset({1})`, `[1]`, `(1, (2, 3))`?
-
-**F7.** Given `people = [("Ada", 36), ("Grace", 45)]`, write a loop printing `1 Ada 36` and `2 Grace 45` using `enumerate` and tuple unpacking in the header.
-
-**F8.** Predict the output and explain what `zip(*rows)` does:
-
-```python
-rows = [(1, "a"), (2, "b")]
-columns = list(zip(*rows))
-print(columns)
-```
-
-**F9.** Write `min_max(xs)` that returns a tuple `(smallest, largest)` and show, in two lines of caller code, how to unpack the result.
-
-**F10.** Explain the exact error raised by `a, b = [1, 2, 3]` and by `a, b, c = [1, 2]`.
-
-**F11.** Rewrite this loop to unpack `item` directly in the `for` header:
-
-```python
-for item in [("a", 1), ("b", 2)]:
-    name = item[0]
-    value = item[1]
-```
-
-**F12.** Write a single assignment statement that rotates three variables so that after `a, b, c = 1, 2, 3` they become `3, 1, 2`.
-
-**F13.** Predict the output:
-
-```python
-data = {"a": 1, "b": 2}
-for index, (key, value) in enumerate(data.items(), start=1):
-    print(index, key, value)
-```
 ## 8. Dictionaries
 
 Dictionaries map hashable keys to values and preserve insertion order.
@@ -575,192 +522,40 @@ Subtleties:
 
 ---
 
+## 9. Sets
 
-## 2. Numbers
-
-Two everyday numeric types:
-
-- `int` — arbitrary precision. There is no 32/64-bit overflow.
-- `float` — IEEE 754 double precision, like JavaScript numbers.
+Sets are unordered collections of unique hashable elements.
 
 ```python
-big = 2 ** 100             # 1267650600228229401496703205376
-print(type(10), type(10.0))  # <class 'int'> <class 'float'>
+s = {1, 2, 3}
+empty = set()          # NOT {} -- that is an empty dict
+s.add(4)
+s.discard(99)          # no error if missing
+s.remove(99)           # KeyError if missing
+2 in s                 # fast membership (hash-based)
+len(s)
+
+a = {1, 2, 3}
+b = {3, 4}
+a | b       # {1, 2, 3, 4}  union
+a & b       # {3}           intersection
+a - b       # {1, 2}        difference
+a ^ b       # {1, 2, 4}     symmetric difference
+a <= {1, 2, 3, 4}   # True -- subset
 ```
 
-### Operators that differ from TypeScript
+Rules and uses:
 
-```python
-print(7 / 2)      # 3.5   -- / ALWAYS produces a float
-print(7 // 2)     # 3     -- floor division
-print(7 % 2)      # 1
-print(2 ** 10)    # 1024  -- ** is exponentiation, ^ is NOT
-```
-
-Floor division and modulo round toward negative infinity, not toward zero:
-
-```python
-print(-7 // 2)    # -4
-print(-7 % 2)     # 1     (result has the sign of the divisor)
-print(-7 // -2)   # 3
-print(-7 % -2)    # -1
-```
-
-JavaScript's `Math.floor(-7 / 2)` is `-4`, matching `//`. JavaScript's `%` returns `-1` for `-7 % 2`, which does not match Python.
-
-### Conversions and pitfalls
-
-```python
-int("42")       # 42
-int("3.9")      # ValueError -- not a valid integer literal
-int(3.9)        # 3    -- truncates toward zero
-int(-3.9)       # -3
-int("ff", 16)   # 255  -- optional base
-float("2.5")    # 2.5
-float("nan")    # nan
-float("inf")    # inf
-str(2.5)        # "2.5"
-```
-
-`round` uses banker's rounding (round half to even):
-
-```python
-round(0.5)      # 0
-round(1.5)      # 2
-round(2.5)      # 2
-round(2.675, 2) # 2.67  -- binary representation strikes again
-```
-
-Floating point behaves exactly as in JavaScript; compare with `math.isclose` when needed:
-
-```python
-import math
-print(0.1 + 0.2)                    # 0.30000000000000004
-print(0.1 + 0.2 == 0.3)             # False
-print(math.isclose(0.1 + 0.2, 0.3)) # True
-```
-
-Also useful: `abs`, `divmod(a, b)` (returns `(a // b, a % b)`), `min`, `max`, `sum`, `pow`, and the `math` module. Numeric literals may use underscores (`1_000_000`) and bases (`0b1010`, `0o17`, `0x1F`).
-
-Booleans are numbers: `True == 1` and `True + True == 2`. Never use this for arithmetic in application code, but expect to encounter it in code that sums flags.
+- Sets have no indexing or slicing: `s[0]` raises `TypeError`.
+- Iteration order is unspecified; never rely on printed set order. Sort before display: `sorted(s)`.
+- Elements must be hashable; `{1, [2]}` raises `TypeError`.
+- `set([1, 1, 2])` produces `{1, 2}`; `set("hello")` produces the distinct characters.
+- Membership in a set is O(1) on average versus O(n) for a list — use a set for "have I seen this?" checks in loops.
+- `frozenset` is the immutable, hashable variant usable as a dict key.
+- Set comprehension syntax: `{x * 2 for x in xs}`.
 
 ---
 
-
-
-## Group B — Numbers
-
-**B1.** Predict both lines:
-
-```python
-print(9 / 2, 9 // 2, 9 % 2)
-print(-9 / 2, -9 // 2, -9 % 2)
-```
-
-**B2.** In JavaScript, `-7 % 2` is `-1`. State the results of `-7 % 2` and `-7 // 2` in Python, and explain the rounding rule for `//` and `%` with negative numbers.
-
-**B3.** Predict the three lines, then write a comparison that correctly checks whether `a` and `b` are equal within a small tolerance:
-
-```python
-a = 0.1 + 0.2
-b = 0.3
-print(a)
-print(a == b)
-print(round(a, 1) == round(b, 1))
-```
-
-**B4.** Predict each value or state that it raises `ValueError`/`TypeError`:
-
-```python
-int("7")
-int(7.9)
-int(-7.9)
-float("7")
-str(7.5)
-int("3.5")
-int("  4  ")
-int("0x10")
-int("0x10", 16)
-```
-
-**B5.** Predict each result: `round(0.5)`, `round(1.5)`, `round(2.5)`, `round(-1.5)`, `round(-0.5)`, `round(3.14159, 2)`. Name the rounding mode Python uses.
-
-**B6.** Predict the two tuples: `divmod(17, 5)` and `divmod(-17, 5)`.
-
-**B7.** Predict each expression: `2 ** 64`, `2 ** 0.5`, `10 ** 20 + 1`, `-3 ** 2`, `(-3) ** 2`, `7 // 2 * 2 + 7 % 2`.
-
-**B8.** State the value of each literal: `1_000_000`, `0b1011`, `0o12`, `0xFF`, `1e3`. Which of these are valid TypeScript literals as well?
-
-**B9.** Predict each expression, paying attention to precedence and associativity: `2 + 3 * 4 ** 2`, `(2 + 3) * 4`, `10 - 4 - 3`, `2 ** 3 ** 2`.
-
-**B10.** Predict the output and explain why it is not `3.0`:
-
-```python
-print(True + True + False)
-print(sum([True, True, False]))
-print(isinstance(True, int))
-```
-
-**B11.** Write `count_down(n)` that prints `n, n-1, ..., 1, 0`, then `"liftoff"`, using a `while` loop. Then write the same with a `for` loop and `range`.
-
-**B12.** Write `is_close(a, b, tol=1e-9)` returning a boolean, and use it to compare `0.1 + 0.2` with `0.3`.
-
-**B13.** Predict the outputs and state what the second demonstrates about NaN:
-
-```python
-import math
-print(math.inf > 10 ** 100)
-nan = float("nan")
-print(nan == nan, math.isnan(nan))
-```
-
-**B14.** Predict `-1 // 10` and `-1 % 10`. Explain why the remainder is not `-1` as in JavaScript.
-
-**B15.** A function receives `total` in cents and must print a currency string rounded to cents. Given `total = 123456.789`, write an f-string producing `$1,234.57` (assume `total` is already a plain number; you may divide by 100 first if you prefer).
-
-
-## Group H — Sets
-
-**H1.** State what each literal or call produces: `{}`, `set()`, `{1, 2, 2}`, `set("mississippi")`, `set([1, 1, 2]) == {1, 2}`.
-
-**H2.** Predict each, using `sorted(...)` to make the output deterministic:
-
-```python
-a = {1, 2, 3}
-b = {2, 3, 4}
-print(sorted(a | b))
-print(sorted(a & b))
-print(sorted(a - b))
-print(sorted(a ^ b))
-```
-
-**H3.** For each statement on `s = {1, 2}`, state whether it raises or silently does nothing: `s.add(3)`, `s.discard(9)`, `s.remove(9)`, `s.pop()`, `s.clear()`.
-
-**H4.** Explain why checking `x in large_collection` is faster for a set than for a list, and rewrite this loop to use a set:
-
-```python
-seen = []
-for item in stream:
-    if item not in seen:
-        seen.append(item)
-        process(item)
-```
-
-**H5.** Explain the exact error raised by `{1, 2, 3}[0]` and the correct way to get an arbitrary element.
-
-**H6.** State the error raised by `{1, [2, 3]}` and give two different fixes that keep the "collection of items" meaning.
-
-**H7.** Predict: `{1, 2} <= {1, 2, 3}`, `{1, 2, 3} >= {1, 2}`, `{1, 2} < {1, 2}`, `{1, 2} < {1, 2, 3}`.
-
-**H8.** Write `changed_ids(old_ids, new_ids)` returning the set of ids that were added or removed between two collections of ids, in one expression using a set operator.
-
-**H9.** Deduplicate `["b", "a", "b", "c"]` two ways: once with a set (losing order) and once preserving order. Explain when each is acceptable.
-
-**H10.** Explain why `frozenset({"read", "write"})` can be used as a dict key while `{"read", "write"}` cannot, and write three lines that use a frozenset key in a dict.
-
-**H11.** Predict each: `2 in {1, 2}`, `2 in {1: "b"}`, `"a" in {"a": 1}`, `[1] in {1, 2}`.
-
-**H12.** Given two lists of tags, `old_tags` and `new_tags`, write code producing (a) tags present in both, (b) tags only in `new_tags`, (c) all tags, deduplicated. Use set operations and return sorted lists for deterministic output.
 ## 10. Conditionals and loops
 
 ### Indentation defines blocks
@@ -879,360 +674,45 @@ Traps:
 
 ---
 
+## 11. Comprehensions
 
-
-
-## Group G — Dictionaries
-
-**G1.** Predict each printed value:
+Comprehensions build a new collection from an iterable in one expression. They are central to idiomatic Python.
 
 ```python
-d = {"a": 1}
-d["b"] = 2
-print(d.get("c"))
-print(d.get("c", 0))
-print(d.get("a"))
-print(len(d))
+xs = [1, -2, 3, -4]
+
+squares = [x * x for x in xs]                  # [1, 4, 9, 16]
+positives = [x for x in xs if x > 0]           # [1, 3]
+abs_values = [x if x > 0 else -x for x in xs]  # [1, 2, 3, 4]
+pairs = {x: x * x for x in range(3)}           # {0: 0, 1: 1, 2: 4}
+unique_lens = {len(w) for w in ["a", "bb", "c"]}  # {1, 2}
+flat = [c for word in ["ab", "cd"] for c in word]  # ["a", "b", "c", "d"]
 ```
 
-**G2.** Given `config = {}`, state which line raises, and the final value of `config` if the raising line is removed:
+Reading order of a nested comprehension: the `for` clauses appear in the same order you would write nested loops; the expression on the left is the innermost body.
 
 ```python
-config["timeout"] = config.get("timeout", 30)
-value = config.setdefault("retries", 3)
-value = config["missing"]
+matrix = [[1, 2], [3, 4]]
+flat = [n for row in matrix for n in row]   # [1, 2, 3, 4]
 ```
 
-**G3.** Write `word_counts(words)` returning a dict of counts for the list `["b", "a", "b", "c", "b"]`, using `get`.
+Rules and guidance:
 
-**G4.** Predict the exact output order:
+- A conditional filter (`if x > 0`) goes after the `for`; an if/else expression goes *before* the `for`.
+- Comprehension variables live in their own scope and do not leak.
+- Prefer a comprehension to `map`/`filter` chains; Python's equivalents are less idiomatic for simple transformations.
+- Do not use comprehensions for side effects (`[print(x) for x in xs]` is an anti-pattern).
+- If the logic needs more than two `for`/`if` clauses, or nested conditionals, write a loop.
+- A **generator expression** looks identical with parentheses instead of brackets and is lazy — it produces values on demand and is consumed once:
 
 ```python
-d = {"x": 1, "y": 2}
-for k in d:
-    print(k)
-for v in d.values():
-    print(v)
-for k, v in d.items():
-    print(k, v)
+total = sum(x * x for x in xs)   # no intermediate list is built
 ```
 
-**G5.** Predict all three printed dicts:
-
-```python
-a = {"x": 1, "y": 2}
-b = {"y": 20, "z": 30}
-print({**a, **b})
-print(a | b)
-c = dict(a)
-c.update(b)
-print(c)
-```
-
-**G6.** Predict the resulting dict: `{1: "a", True: "b", 1.0: "c"}`. Explain the collisions.
-
-**G7.** Given:
-
-```python
-response = {"data": {"items": [{"id": 1}, {"id": 2}]}}
-```
-
-write one expression that extracts the id of the second item, and one expression that uses `get` to return `None` instead of raising when `"data"` or `"items"` are missing. (Nested `get` chains are fine.)
-
-**G8.** Write a dict comprehension that inverts `{"a": 1, "b": 2}` into `{1: "a", 2: "b"}`. State what happens if two keys share a value.
-
-**G9.** Predict each: `"a" in {"a": 1}`, `1 in {"a": 1}`, `"a" in {"a": 1}.keys()`, `1 in {"a": 1}.values()`.
-
-**G10.** Given records shaped `{"id": 1, "team": "blue"}`, write code using `setdefault` to build `{"blue": [1, 3], "red": [2]}` from `[{"id": 1, "team": "blue"}, {"id": 2, "team": "red"}, {"id": 3, "team": "blue"}]`.
-
-**G11.** Write `top_words(text, n=3)` returning the `n` most frequent words from a whitespace-split text, sorted by count descending and then alphabetically for ties. Return a list of `(word, count)` tuples.
-
-**G12.** Predict the output: `list(dict.fromkeys(["b", "a", "b", "c", "a"]))`. Explain how this preserves order while deduplicating.
-
-**G13.** Predict both printed lines:
-
-```python
-d = {"a": 1, "b": 2}
-print(d.pop("a"), d)
-print(d.pop("z", None), d)
-```
-
-**G14.** Predict: `dict([("a", 1), ("b", 2)])` and `dict(a=1, b=2)`.
-
-**G15.** Predict and explain: `{"a": 1, "b": 2} == {"b": 2, "a": 1}`.
-
-**G16.** Write `merge_defaults(defaults, overrides)` returning a new dict where `overrides` wins on conflicts, without mutating either input.
-
-**G17.** Write `required_missing(payload, required)` that returns a sorted list of required keys absent from `payload`. Example: `required_missing({"a": 1}, ["a", "b", "c"])` returns `["b", "c"]`.
-## 9. Sets
-
-Sets are unordered collections of unique hashable elements.
-
-```python
-s = {1, 2, 3}
-empty = set()          # NOT {} -- that is an empty dict
-s.add(4)
-s.discard(99)          # no error if missing
-s.remove(99)           # KeyError if missing
-2 in s                 # fast membership (hash-based)
-len(s)
-
-a = {1, 2, 3}
-b = {3, 4}
-a | b       # {1, 2, 3, 4}  union
-a & b       # {3}           intersection
-a - b       # {1, 2}        difference
-a ^ b       # {1, 2, 4}     symmetric difference
-a <= {1, 2, 3, 4}   # True -- subset
-```
-
-Rules and uses:
-
-- Sets have no indexing or slicing: `s[0]` raises `TypeError`.
-- Iteration order is unspecified; never rely on printed set order. Sort before display: `sorted(s)`.
-- Elements must be hashable; `{1, [2]}` raises `TypeError`.
-- `set([1, 1, 2])` produces `{1, 2}`; `set("hello")` produces the distinct characters.
-- Membership in a set is O(1) on average versus O(n) for a list — use a set for "have I seen this?" checks in loops.
-- `frozenset` is the immutable, hashable variant usable as a dict key.
-- Set comprehension syntax: `{x * 2 for x in xs}`.
+Generators get full treatment in Chapter 2; for now, use them where a function like `sum`, `any`, or `max` consumes an iterable.
 
 ---
 
-
-## 3. Strings
-
-Strings are **immutable sequences of Unicode code points**.
-
-```python
-s = "hello"
-s2 = 'single quotes work too'
-s3 = """triple quotes
-span multiple lines"""
-raw = r"C:\new\folder"     # backslashes are literal
-```
-
-No method ever mutates a string; every "modifying" method returns a new one.
-
-### Indexing and slicing
-
-```python
-s = "python"
-print(s[0])      # p
-print(s[-1])     # n
-print(s[1:4])    # yth      (end index is exclusive)
-print(s[:3])     # pyt
-print(s[3:])     # hon
-print(s[::2])    # pto
-print(s[::-1])   # nohtyp
-```
-
-Key differences from JavaScript and TypeScript:
-
-- Negative indexes are normal and legal (`s[-1]`), unlike JS arrays.
-- `s[2:100]` does *not* error on an out-of-range end; it returns `"thon"`.
-- `s[100]` *does* raise `IndexError`.
-- Slices copy: `t = s[1:3]` is a new string object.
-
-### f-strings and formatting
-
-```python
-name = "Ada"
-score = 91.2567
-
-print(f"{name} scored {score:.1f}")      # Ada scored 91.3
-print(f"{1234567:,}")                    # 1,234,567
-print(f"{42:05d}")                       # 00042
-print(f"{0.75:.0%}")                     # 75%
-print(f"{name!r}")                       # 'Ada'
-print(f"{score=}")                       # score=91.2567
-```
-
-`f"{x=}"` (Python 3.8+) prints the expression text and its value — handy for debugging.
-
-### Common string operations
-
-```python
-s = "  Hello, World  "
-s.strip()                 # "Hello, World"
-s.strip().lower()         # "hello, world"
-s.strip().split(", ")     # ["Hello", "World"]
-",".join(["a", "b"])      # "a,b"
-"hello".replace("l", "L") # "heLLo"
-"hello".startswith("he")  # True
-"hello".find("z")         # -1    (index() raises ValueError instead)
-"hello".count("l")        # 2
-"ell" in "hello"          # True
-len("hello")              # 5
-```
-
-Details worth remembering:
-
-- `"".join(parts)` is the idiomatic way to concatenate many strings. Joining non-strings raises `TypeError`.
-- `text.split()` with no arguments splits on runs of whitespace and removes empty strings; `text.split(" ")` does not.
-- `"abc" + 1` raises `TypeError`. You must convert explicitly: `"abc" + str(1)`.
-- `"-" * 3` is `"---"`; multiplying a string by an int repeats it.
-- `str()` and `repr()` differ: `str("a")` is `a`, `repr("a")` is `'a'`. `print` uses `str`; containers display their elements with `repr`.
-- String comparison is by code point: `"Z" < "a"` is `True`.
-- Text is Unicode; converting to bytes uses `s.encode("utf-8")` and `b.decode("utf-8")`. You will need this when working with files and HTTP (Chapters 3 and 5).
-
----
-
-
-
-## Group C — Strings
-
-**C1.** Given `s = "mathematics"`, predict each expression: `s[:4]`, `s[4:]`, `s[-3:]`, `s[::3]`, `s[::-1]`, `s[2:100]`, `s[100:200]`, `s[100]`.
-
-**C2.** Write two different expressions or functions that reverse a string.
-
-**C3.** For each line, state whether it succeeds or raises, and why:
-
-```python
-s = "data"
-s[0] = "D"
-s = s.replace("d", "D")
-s += "set"
-```
-
-**C4.** Given `x = 12.3456`, `n = 7`, `name = "api"`, predict each printed line:
-
-```python
-print(f"{x:.2f}")
-print(f"{n:03d}")
-print(f"{n / 8:.1%}")
-print(f"{name.upper()} v{n}")
-print(f"{n=}")
-```
-
-**C5.** Using `parts = ["alpha", "beta", "gamma"]` and its text form `"alpha-beta-gamma"`, write one expression that joins and one that parses back to the original list.
-
-**C6.** Fix this line so it prints `retries: 3` without manual concatenation of mixed types:
-
-```python
-print("retries: " + 3)
-```
-
-**C7.** Predict each printed line:
-
-```python
-print("a b  c".split())
-print("a b  c".split(" "))
-print("a,b,".split(","))
-print(",".join(["x", "y"]))
-print(",".join([]))
-```
-
-**C8.** Predict: `"a-b-c".replace("-", "_").replace("a", "A")`.
-
-**C9.** Given `s = "banana"`, predict all four: `s.find("an")`, `s.rfind("an")`, `s.index("an")`, `s.count("an")`.
-
-**C10.** Write `is_palindrome(text)` that ignores case and all non-alphanumeric characters. Example: `"A man, a plan, a canal: Panama"` returns `True`.
-
-**C11.** Predict each printed line and explain the difference between `str` and `repr`:
-
-```python
-print("a")
-print(repr("a"))
-print(["a", "b"])
-```
-
-**C12.** Predict each printed line and the length in the last line:
-
-```python
-print("a\nb")
-print(r"a\nb")
-print("""x
-y""")
-print(len("\t"))
-```
-
-**C13.** Write `normalize(text)` that trims the ends and collapses any run of whitespace (spaces, tabs, newlines) into a single space, using `split()` and `join`. Example: `normalize("  a \t b\n c ")` returns `"a b c"`.
-
-**C14.** Given `total = 1234.5678`, predict `f"{total:,.2f}"`. Then write an expression producing `75%` from the float `0.75` using a format spec, not string concatenation.
-
-**C15.** Predict: `"an" in "banana"`, `"x" in "banana"`, `"b" in ["b"]`, `"ab" in "abc"`.
-
-**C16.** Predict each result: `"xxabcxx".strip("x")`, `"xxabcxx".lstrip("x")`, `"xxabcxx".rstrip("x")`, `"abc".center(7, "-")`.
-
-**C17.** Write `initials(full_name)` turning `"ada lovelace"` into `"A.L."` (uppercase initial and dot for each word, split on whitespace).
-
-**C18.** Given a list of raw CSV lines, write an expression that splits each line on commas and strips each field:
-
-```python
-lines = ["a, b ,c", "1,2, 3"]
-```
-
-
-## Group J — Comprehensions
-
-**J1.** Predict the output: `[x * 2 for x in [1, 2, 3]]`.
-
-**J2.** Predict the output: `[x for x in [4, -1, 5, -2] if x > 0]`.
-
-**J3.** Predict both outputs:
-
-```python
-print([x if x > 0 else -x for x in [4, -1, 5, -2]])
-print([-x if x > 0 else x for x in [4, -1]])
-```
-
-**J4.** Given `keys = ["a", "b"]` and `values = [1, 2]`, write a dict comprehension producing `{"a": 1, "b": 2}`.
-
-**J5.** Predict the output: `sorted({len(w) for w in ["a", "bb", "c", "ddd"]})`.
-
-**J6.** Predict the output: `[n for row in [[1, 2], [3]] for n in row]`.
-
-**J7.** Predict the output: `[(x, y) for x in [1, 2] for y in ["a", "b"]]`. Then state how the nested loops would be written as a normal `for` loop.
-
-**J8.** Predict both printed lines and explain why the second is not `1`:
-
-```python
-x = "outer"
-print([x for x in range(2)])
-print(x)
-```
-
-**J9.** Rewrite this loop as a single comprehension:
-
-```python
-result = []
-for n in range(10):
-    if n % 3 == 0:
-        result.append(n * n)
-```
-
-**J10.** Given `lines = ["  Alpha ", "BETA", " gamma "]`, write a comprehension producing `["alpha", "beta", "gamma"]`.
-
-**J11.** Predict the output: `sum(x * x for x in range(4))`. Explain what is different between this and `sum([x * x for x in range(4)])`.
-
-**J12.** Identify the anti-pattern and rewrite it correctly:
-
-```python
-[print(x) for x in [1, 2, 3]]
-```
-
-**J13.** Given records `[{"id": 1, "name": "a", "active": True}, {"id": 2, "name": "b", "active": False}, {"id": 3, "name": "c", "active": True}]`, write one dict comprehension mapping `id` to `name` for active records only.
-
-**J14.** Predict the output: `[x * y for x in range(3) if x for y in range(2)]`.
-
-**J15.** Rewrite this as one comprehension:
-
-```python
-names = ["ada", "alan", "grace", "bob"]
-upper_long = []
-for name in names:
-    if len(name) > 3:
-        upper_long.append(name.upper())
-```
-
-**J16.** Write a comprehension that produces the uppercase first letters of words longer than three characters from `["api", "gateway", "ui", "cache"]`. Expected: `["A", "G", "C"]`.
-
-**J17.** Explain why this comprehension is a poor choice and rewrite it as a loop:
-
-```python
-logs = []
-[logs.extend(line.strip().split()) for line in ["a b", "c d"]]
-```
 ## 12. Unpacking
 
 Unpacking distributes the elements of an iterable into names. It is used pervasively in Python code.
@@ -1371,8 +851,752 @@ Python is neither strictly "pass by value" nor "pass by reference": names inside
 
 ---
 
+## 14. Scope
 
+Python resolves names with the **LEGB** rule: **L**ocal, **E**nclosing function, **G**lobal (module), **B**uilt-in.
 
+There is no block scope. Unlike TypeScript's `let`/`const`, a name assigned inside `if`, `for`, or `while` belongs to the enclosing function or module:
+
+```python
+for i in range(3):
+    pass
+print(i)            # 2 -- still defined
+
+if condition:
+    temp = 1
+print(temp)         # works (if the branch ran)
+```
+
+That makes loop variables and temporaries leak, unlike TypeScript.
+
+### Reading versus assigning
+
+Reading a global from a function works. Assigning to a name anywhere in a function makes it local for the *entire* function, which causes `UnboundLocalError` when read before assignment:
+
+```python
+counter = 0
+
+def bump():
+    counter += 1        # UnboundLocalError: local variable 'counter'
+
+def bump():
+    global counter      # explicit; use sparingly
+    counter += 1
+```
+
+For closures, `nonlocal` reassigns a name in the nearest enclosing function scope:
+
+```python
+def make_counter():
+    count = 0
+    def increment():
+        nonlocal count
+        count += 1
+        return count
+    return increment
+```
+
+### Other scope facts
+
+- Builtins (`list`, `id`, `sum`, `dict`, ...) can be shadowed. `list = [1, 2]` breaks `list("ab")` for the rest of that scope. Never do this.
+- Comprehension variables have their own scope and do not leak: after `[x for x in range(3)]`, `x` is undefined unless it existed before.
+- Functions capture variables, not values. Lambdas created in a loop all see the final value:
+
+```python
+funcs = [lambda: i for i in range(3)]
+print([f() for f in funcs])   # [2, 2, 2]
+```
+
+- `del name` removes the binding from the current namespace; it does not destroy the object while other names reference it.
+- Module-level code runs top to bottom at import time; function bodies run only when called. (Modules and imports are covered in Chapter 2.)
+
+---
+
+## 15. Idioms and common mistakes
+
+Idioms to adopt:
+
+- `if not xs:` / `if xs is None:` — pick the check that matches the meaning.
+- `enumerate`, `zip`, `items()` instead of index arithmetic.
+- `"".join(parts)` instead of repeated `+=` for strings.
+- `dict.get(key, default)` and `setdefault` for optional and grouped data.
+- Comprehensions instead of `map`/`filter` loops.
+- `a, b = b, a` swaps; star-unpacking for head/tail.
+- f-strings for all formatting.
+- `sorted(data, key=...)` instead of hand-written comparators.
+
+Mistakes to avoid:
+
+1. `xs = xs.sort()` — in-place methods return `None`.
+2. Mutable default arguments (`def f(x, acc=[])`).
+3. `[[0] * 3] * 3` — repeated aliases, not independent rows.
+4. Using `is` to compare values instead of `None`/sentinels.
+5. Expecting `/` to do integer division, or `%` to follow JavaScript sign rules.
+6. `"count: " + n` — no implicit string conversion.
+7. `{}` for an empty set; it is an empty dict.
+8. Mutating a list while iterating over it.
+9. Assuming loop variables disappear after the loop.
+10. Trusting `and`/`or` to return booleans rather than operands.
+11. Assuming `if name:` when `""` is a valid value.
+12. Forgetting the comma in one-element tuples.
+13. `int("3.5")` instead of `int(float("3.5"))`.
+14. Shadowing builtins such as `list`, `id`, `str`, `sum`.
+15. Function calls where `return` was intended, or vice versa.
+
+---
+
+# Exercises
+
+Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, and reconcile.
+
+## Group A — Names, aliasing, identity, and mutability
+
+**A1.** Predict the output:
+
+```python
+a = [1, 2]
+b = a
+c = a[:]
+b.append(3)
+c.append(4)
+print(a, c)
+```
+
+**A2.** Predict the output:
+
+```python
+x = {"n": 1}
+y = x
+x["n"] = 2
+y = {"n": 3}
+print(x, y)
+```
+
+**A3.** Predict the output and explain why `xs` ends as it does:
+
+```python
+def add_item(items, item):
+    items.append(item)
+
+def replace(items):
+    items = []
+
+xs = [1]
+add_item(xs, 2)
+replace(xs)
+print(xs)
+```
+
+**A4.** The following code was meant to copy `original` so that mutating `copy` leaves `original` untouched, but it has a bug. Identify the bug and give two different fixes:
+
+```python
+original = [1, 2, 3]
+copy = original
+copy.append(4)
+print(original)
+```
+
+**A5.** For each pair, state whether `a is b`, `a == b`, both, or neither is `True`, and explain:
+
+```python
+a = [1, 2, 3]
+b = [1, 2, 3]
+```
+
+```python
+a = (1, 2)
+b = a
+```
+
+```python
+a = "hello"
+b = "hello"
+```
+
+**A6.** Predict the output:
+
+```python
+a = [1, 2, 3]
+b = a
+b = b + [4]
+b += [5]
+print(a, b)
+```
+
+**A7.** Predict both outputs:
+
+```python
+import copy
+
+a = [[1], [2]]
+b = a[:]
+c = copy.deepcopy(a)
+b[0].append(9)
+b.append([3])
+print(a)
+print(c)
+```
+
+**A8.** When run in a REPL, `a = 1000; b = 1000; a is b` may print `False`, yet `a = 256; b = 256; a is b` prints `True`. Explain both results and state the rule you should follow in your own code.
+
+**A9.** Predict the four printed booleans:
+
+```python
+a = [1]
+b = [1]
+c = a
+print(a is b, a is c, a == b, a == c)
+```
+
+**A10.** For each type, state whether values are mutable and whether the type is hashable: `int`, `str`, `list`, `tuple`, `dict`, `set`, `frozenset`, `bool`, `None`.
+
+**A11.** Fill in the blank four different ways such that `b` is a copy that can be mutated independently of `a` (shallow copies are acceptable unless stated otherwise):
+
+```python
+a = [[1, 2], [3, 4]]
+b = ______  # must not be "a"
+```
+
+**A12.** One of the following statements succeeds and the other raises. Identify which is which, give the exact exception type, and explain the difference:
+
+```python
+t = (1, [2, 3])
+t[1].append(4)
+t[0] = 9
+```
+
+**A13.** Write a function `same_object(a, b)` that returns `True` when the two arguments are the same object, implemented (a) with `id()` and (b) with `is`. State which one you would actually use.
+
+**A14.** Predict the output:
+
+```python
+a = 5
+b = a
+a += 1
+print(a, b)
+```
+
+**A15.** Explain why this function does not modify the caller's list, then rewrite it so it does:
+
+```python
+def clear_all(xs):
+    xs = []
+```
+
+## Group B — Numbers
+
+**B1.** Predict both lines:
+
+```python
+print(9 / 2, 9 // 2, 9 % 2)
+print(-9 / 2, -9 // 2, -9 % 2)
+```
+
+**B2.** In JavaScript, `-7 % 2` is `-1`. State the results of `-7 % 2` and `-7 // 2` in Python, and explain the rounding rule for `//` and `%` with negative numbers.
+
+**B3.** Predict the three lines, then write a comparison that correctly checks whether `a` and `b` are equal within a small tolerance:
+
+```python
+a = 0.1 + 0.2
+b = 0.3
+print(a)
+print(a == b)
+print(round(a, 1) == round(b, 1))
+```
+
+**B4.** Predict each value or state that it raises `ValueError`/`TypeError`:
+
+```python
+int("7")
+int(7.9)
+int(-7.9)
+float("7")
+str(7.5)
+int("3.5")
+int("  4  ")
+int("0x10")
+int("0x10", 16)
+```
+
+**B5.** Predict each result: `round(0.5)`, `round(1.5)`, `round(2.5)`, `round(-1.5)`, `round(-0.5)`, `round(3.14159, 2)`. Name the rounding mode Python uses.
+
+**B6.** Predict the two tuples: `divmod(17, 5)` and `divmod(-17, 5)`.
+
+**B7.** Predict each expression: `2 ** 64`, `2 ** 0.5`, `10 ** 20 + 1`, `-3 ** 2`, `(-3) ** 2`, `7 // 2 * 2 + 7 % 2`.
+
+**B8.** State the value of each literal: `1_000_000`, `0b1011`, `0o12`, `0xFF`, `1e3`. Which of these are valid TypeScript literals as well?
+
+**B9.** Predict each expression, paying attention to precedence and associativity: `2 + 3 * 4 ** 2`, `(2 + 3) * 4`, `10 - 4 - 3`, `2 ** 3 ** 2`.
+
+**B10.** Predict the output and explain why it is not `3.0`:
+
+```python
+print(True + True + False)
+print(sum([True, True, False]))
+print(isinstance(True, int))
+```
+
+**B11.** Write `count_down(n)` that prints `n, n-1, ..., 1, 0`, then `"liftoff"`, using a `while` loop. Then write the same with a `for` loop and `range`.
+
+**B12.** Write `is_close(a, b, tol=1e-9)` returning a boolean, and use it to compare `0.1 + 0.2` with `0.3`.
+
+**B13.** Predict the outputs and state what the second demonstrates about NaN:
+
+```python
+import math
+print(math.inf > 10 ** 100)
+nan = float("nan")
+print(nan == nan, math.isnan(nan))
+```
+
+**B14.** Predict `-1 // 10` and `-1 % 10`. Explain why the remainder is not `-1` as in JavaScript.
+
+**B15.** A function receives `total` in cents and must print a currency string rounded to cents. Given `total = 123456.789`, write an f-string producing `$1,234.57` (assume `total` is already a plain number; you may divide by 100 first if you prefer).
+
+## Group C — Strings
+
+**C1.** Given `s = "mathematics"`, predict each expression: `s[:4]`, `s[4:]`, `s[-3:]`, `s[::3]`, `s[::-1]`, `s[2:100]`, `s[100:200]`, `s[100]`.
+
+**C2.** Write two different expressions or functions that reverse a string.
+
+**C3.** For each line, state whether it succeeds or raises, and why:
+
+```python
+s = "data"
+s[0] = "D"
+s = s.replace("d", "D")
+s += "set"
+```
+
+**C4.** Given `x = 12.3456`, `n = 7`, `name = "api"`, predict each printed line:
+
+```python
+print(f"{x:.2f}")
+print(f"{n:03d}")
+print(f"{n / 8:.1%}")
+print(f"{name.upper()} v{n}")
+print(f"{n=}")
+```
+
+**C5.** Using `parts = ["alpha", "beta", "gamma"]` and its text form `"alpha-beta-gamma"`, write one expression that joins and one that parses back to the original list.
+
+**C6.** Fix this line so it prints `retries: 3` without manual concatenation of mixed types:
+
+```python
+print("retries: " + 3)
+```
+
+**C7.** Predict each printed line:
+
+```python
+print("a b  c".split())
+print("a b  c".split(" "))
+print("a,b,".split(","))
+print(",".join(["x", "y"]))
+print(",".join([]))
+```
+
+**C8.** Predict: `"a-b-c".replace("-", "_").replace("a", "A")`.
+
+**C9.** Given `s = "banana"`, predict all four: `s.find("an")`, `s.rfind("an")`, `s.index("an")`, `s.count("an")`.
+
+**C10.** Write `is_palindrome(text)` that ignores case and all non-alphanumeric characters. Example: `"A man, a plan, a canal: Panama"` returns `True`.
+
+**C11.** Predict each printed line and explain the difference between `str` and `repr`:
+
+```python
+print("a")
+print(repr("a"))
+print(["a", "b"])
+```
+
+**C12.** Predict each printed line and the length in the last line:
+
+```python
+print("a\nb")
+print(r"a\nb")
+print("""x
+y""")
+print(len("\t"))
+```
+
+**C13.** Write `normalize(text)` that trims the ends and collapses any run of whitespace (spaces, tabs, newlines) into a single space, using `split()` and `join`. Example: `normalize("  a \t b\n c ")` returns `"a b c"`.
+
+**C14.** Given `total = 1234.5678`, predict `f"{total:,.2f}"`. Then write an expression producing `75%` from the float `0.75` using a format spec, not string concatenation.
+
+**C15.** Predict: `"an" in "banana"`, `"x" in "banana"`, `"b" in ["b"]`, `"ab" in "abc"`.
+
+**C16.** Predict each result: `"xxabcxx".strip("x")`, `"xxabcxx".lstrip("x")`, `"xxabcxx".rstrip("x")`, `"abc".center(7, "-")`.
+
+**C17.** Write `initials(full_name)` turning `"ada lovelace"` into `"A.L."` (uppercase initial and dot for each word, split on whitespace).
+
+**C18.** Given a list of raw CSV lines, write an expression that splits each line on commas and strips each field:
+
+```python
+lines = ["a, b ,c", "1,2, 3"]
+```
+
+## Group D — Booleans, `None`, and truthiness
+
+**D1.** Classify each as truthy or falsy: `0`, `"0"`, `[]`, `[0]`, `""`, `" "`, `None`, `{}`, `set()`, `-1`, `0.0`, `range(0)`.
+
+**D2.** Predict each: `bool(0.1)`, `bool("False")`, `bool([[]])`, `bool(range(1))`, `bool(None)`, `bool(-0.0)`.
+
+**D3.** Predict the output for `name = ""` and then for `name = 0`, and explain the difference between the two checks:
+
+```python
+if name is None:
+    print("None branch")
+if not name:
+    print("falsy branch")
+```
+
+**D4.** Predict all five lines:
+
+```python
+print(3 and 4)
+print(0 and 4)
+print(3 or 4)
+print(0 or 4)
+print([] or {} or "x")
+```
+
+**D5.** This default-value idiom is wrong when `port = 0` is a valid setting. Explain what happens and rewrite it correctly:
+
+```python
+port = settings.get("port") or 8080
+```
+
+**D6.** Write `display_name(user)` returning the user's `"name"` when it is a non-empty string, and `"anonymous"` otherwise. The name may be missing (use `None`), `""`, or a valid string.
+
+**D7.** Predict all four printed values:
+
+```python
+x = None
+print(x == None)
+print(x is None)
+print(x == False)
+print(bool(x))
+```
+
+**D8.** Predict each printed line:
+
+```python
+score = 55
+print("pass" if score >= 60 else "fail")
+x = 0
+print("zero" if not x else "nonzero")
+```
+
+**D9.** Write `is_valid(payload)` returning `True` only when `payload` is a non-empty dict whose `"id"` key exists and is a non-zero integer. No exceptions should escape the function.
+
+## Group E — Lists
+
+**E1.** Predict the output:
+
+```python
+a = [1, 2]
+a.append([3, 4])
+b = [1, 2]
+b.extend([3, 4])
+print(a, b)
+```
+
+**E2.** Predict each output (note the last line uses `xs.index(3)`):
+
+```python
+xs = [1, 2, 3, 2]
+xs.remove(2)
+print(xs)
+print(xs.pop())
+print(xs)
+print(xs.index(3))
+```
+
+**E3.** Predict both printed lines and explain the `None`:
+
+```python
+xs = [3, 1, 2]
+ys = xs.sort()
+print(xs, ys)
+zs = sorted(xs)
+print(xs, zs)
+```
+
+**E4.** Predict both outputs and explain why they differ:
+
+```python
+a = [[0]] * 2
+b = [[0] for _ in range(2)]
+a[0][0] = 5
+b[0][0] = 5
+print(a, b)
+```
+
+**E5.** Given `xs = [0, 1, 2, 3, 4, 5]`, predict each: `xs[1:4]`, `xs[-2:]`, `xs[:2]`, `xs[::2]`, `xs[1::2]`, `xs[5:1]`, `xs[5:1:-1]`.
+
+**E6.** Predict each output:
+
+```python
+xs = [1, 2, 3, 4]
+xs[1:3] = [9]
+print(xs, len(xs))
+xs[0:2] = []
+print(xs)
+```
+
+**E7.** For `xs = ["a", "b", "c", "d"]`, predict the result of `del xs[0]`, then `del xs[1:3]` applied to the result.
+
+**E8.** Predict the outputs and say which names alias each other:
+
+```python
+xs = [1, 2, 3]
+ys = xs
+zs = xs[:]
+ys.append(4)
+zs.append(5)
+print(xs, ys, zs)
+print(xs is ys, xs is zs, xs == zs)
+```
+
+**E9.** Predict each: `2 in [1, 2, 3]`, `[1, 2] in [[1, 2], [3]]`, `[1, 2] == [1, 2, 3]`, `[1, [2]] == [1, [2]]`.
+
+**E10.** Write `remove_duplicates(xs)` returning a new list with duplicates removed, preserving first-occurrence order. Do not mutate the input.
+
+**E11.** Write `flatten(matrix)` turning `[[1, 2], [3], []]` into `[1, 2, 3]`.
+
+**E12.** Predict each output:
+
+```python
+print(sum([1, 2, 3]), min("bca"), max([1, 5, 3]))
+words = ["bb", "a", "ccc"]
+print(sorted(words, key=len, reverse=True))
+```
+
+**E13.** The code below tries to remove all even numbers but leaves one behind. Explain the mechanism and fix it:
+
+```python
+nums = [1, 2, 2, 3]
+for n in nums:
+    if n % 2 == 0:
+        nums.remove(n)
+print(nums)
+```
+
+**E14.** Given `names = ["Ada", "Grace", "Alan"]`, write a single expression producing `[3, 5, 4]`.
+
+**E15.** Predict: `list(range(5))`, `list(range(2, 5))`, `list("ab")`, `[0] * 3`, `[] + [1]`.
+
+**E16.** Predict the output and explain:
+
+```python
+a = [1, 2]
+b = a * 2
+a.append(3)
+print(b, a)
+```
+
+**E17.** Write `second_largest(xs)` returning the second largest distinct value or `None` for lists with fewer than two distinct values. Examples: `[3, 1, 4, 4]` returns `3`; `[5, 5]` returns `None`.
+
+## Group F — Tuples and unpacking
+
+**F1.** For each expression, state whether the result is a tuple and why: `1,`, `(1)`, `(1,)`, `()`, `tuple("ab")`, `(1, 2)[0:1]`.
+
+**F2.** Predict each output:
+
+```python
+t = (1, 2, 3)
+a, b, c = t
+print(a, b, c)
+x, *rest = t
+print(x, rest)
+```
+
+**F3.** Predict both printed lines:
+
+```python
+first, *middle, last = [1, 2, 3, 4, 5]
+print(first, middle, last)
+*x, = [1, 2]
+print(x)
+```
+
+**F4.** Predict the output and name the idiom in use:
+
+```python
+a, b = 1, 2
+b, a = a, b
+print(a, b)
+```
+
+**F5.** Identify which statements raise and which succeed, and explain the last two:
+
+```python
+t = (1, 2, 3)
+t[0] = 9
+t = t + (4,)
+t += (5,)
+```
+
+**F6.** Which of these are valid dictionary keys and why: `(1, 2)`, `(1, [2])`, `frozenset({1})`, `[1]`, `(1, (2, 3))`?
+
+**F7.** Given `people = [("Ada", 36), ("Grace", 45)]`, write a loop printing `1 Ada 36` and `2 Grace 45` using `enumerate` and tuple unpacking in the header.
+
+**F8.** Predict the output and explain what `zip(*rows)` does:
+
+```python
+rows = [(1, "a"), (2, "b")]
+columns = list(zip(*rows))
+print(columns)
+```
+
+**F9.** Write `min_max(xs)` that returns a tuple `(smallest, largest)` and show, in two lines of caller code, how to unpack the result.
+
+**F10.** Explain the exact error raised by `a, b = [1, 2, 3]` and by `a, b, c = [1, 2]`.
+
+**F11.** Rewrite this loop to unpack `item` directly in the `for` header:
+
+```python
+for item in [("a", 1), ("b", 2)]:
+    name = item[0]
+    value = item[1]
+```
+
+**F12.** Write a single assignment statement that rotates three variables so that after `a, b, c = 1, 2, 3` they become `3, 1, 2`.
+
+**F13.** Predict the output:
+
+```python
+data = {"a": 1, "b": 2}
+for index, (key, value) in enumerate(data.items(), start=1):
+    print(index, key, value)
+```
+
+## Group G — Dictionaries
+
+**G1.** Predict each printed value:
+
+```python
+d = {"a": 1}
+d["b"] = 2
+print(d.get("c"))
+print(d.get("c", 0))
+print(d.get("a"))
+print(len(d))
+```
+
+**G2.** Given `config = {}`, state which line raises, and the final value of `config` if the raising line is removed:
+
+```python
+config["timeout"] = config.get("timeout", 30)
+value = config.setdefault("retries", 3)
+value = config["missing"]
+```
+
+**G3.** Write `word_counts(words)` returning a dict of counts for the list `["b", "a", "b", "c", "b"]`, using `get`.
+
+**G4.** Predict the exact output order:
+
+```python
+d = {"x": 1, "y": 2}
+for k in d:
+    print(k)
+for v in d.values():
+    print(v)
+for k, v in d.items():
+    print(k, v)
+```
+
+**G5.** Predict all three printed dicts:
+
+```python
+a = {"x": 1, "y": 2}
+b = {"y": 20, "z": 30}
+print({**a, **b})
+print(a | b)
+c = dict(a)
+c.update(b)
+print(c)
+```
+
+**G6.** Predict the resulting dict: `{1: "a", True: "b", 1.0: "c"}`. Explain the collisions.
+
+**G7.** Given:
+
+```python
+response = {"data": {"items": [{"id": 1}, {"id": 2}]}}
+```
+
+write one expression that extracts the id of the second item, and one expression that uses `get` to return `None` instead of raising when `"data"` or `"items"` are missing. (Nested `get` chains are fine.)
+
+**G8.** Write a dict comprehension that inverts `{"a": 1, "b": 2}` into `{1: "a", 2: "b"}`. State what happens if two keys share a value.
+
+**G9.** Predict each: `"a" in {"a": 1}`, `1 in {"a": 1}`, `"a" in {"a": 1}.keys()`, `1 in {"a": 1}.values()`.
+
+**G10.** Given records shaped `{"id": 1, "team": "blue"}`, write code using `setdefault` to build `{"blue": [1, 3], "red": [2]}` from `[{"id": 1, "team": "blue"}, {"id": 2, "team": "red"}, {"id": 3, "team": "blue"}]`.
+
+**G11.** Write `top_words(text, n=3)` returning the `n` most frequent words from a whitespace-split text, sorted by count descending and then alphabetically for ties. Return a list of `(word, count)` tuples.
+
+**G12.** Predict the output: `list(dict.fromkeys(["b", "a", "b", "c", "a"]))`. Explain how this preserves order while deduplicating.
+
+**G13.** Predict both printed lines:
+
+```python
+d = {"a": 1, "b": 2}
+print(d.pop("a"), d)
+print(d.pop("z", None), d)
+```
+
+**G14.** Predict: `dict([("a", 1), ("b", 2)])` and `dict(a=1, b=2)`.
+
+**G15.** Predict and explain: `{"a": 1, "b": 2} == {"b": 2, "a": 1}`.
+
+**G16.** Write `merge_defaults(defaults, overrides)` returning a new dict where `overrides` wins on conflicts, without mutating either input.
+
+**G17.** Write `required_missing(payload, required)` that returns a sorted list of required keys absent from `payload`. Example: `required_missing({"a": 1}, ["a", "b", "c"])` returns `["b", "c"]`.
+
+## Group H — Sets
+
+**H1.** State what each literal or call produces: `{}`, `set()`, `{1, 2, 2}`, `set("mississippi")`, `set([1, 1, 2]) == {1, 2}`.
+
+**H2.** Predict each, using `sorted(...)` to make the output deterministic:
+
+```python
+a = {1, 2, 3}
+b = {2, 3, 4}
+print(sorted(a | b))
+print(sorted(a & b))
+print(sorted(a - b))
+print(sorted(a ^ b))
+```
+
+**H3.** For each statement on `s = {1, 2}`, state whether it raises or silently does nothing: `s.add(3)`, `s.discard(9)`, `s.remove(9)`, `s.pop()`, `s.clear()`.
+
+**H4.** Explain why checking `x in large_collection` is faster for a set than for a list, and rewrite this loop to use a set:
+
+```python
+seen = []
+for item in stream:
+    if item not in seen:
+        seen.append(item)
+        process(item)
+```
+
+**H5.** Explain the exact error raised by `{1, 2, 3}[0]` and the correct way to get an arbitrary element.
+
+**H6.** State the error raised by `{1, [2, 3]}` and give two different fixes that keep the "collection of items" meaning.
+
+**H7.** Predict: `{1, 2} <= {1, 2, 3}`, `{1, 2, 3} >= {1, 2}`, `{1, 2} < {1, 2}`, `{1, 2} < {1, 2, 3}`.
+
+**H8.** Write `changed_ids(old_ids, new_ids)` returning the set of ids that were added or removed between two collections of ids, in one expression using a set operator.
+
+**H9.** Deduplicate `["b", "a", "b", "c"]` two ways: once with a set (losing order) and once preserving order. Explain when each is acceptable.
+
+**H10.** Explain why `frozenset({"read", "write"})` can be used as a dict key while `{"read", "write"}` cannot, and write three lines that use a frozenset key in a dict.
+
+**H11.** Predict each: `2 in {1, 2}`, `2 in {1: "b"}`, `"a" in {"a": 1}`, `[1] in {1, 2}`.
+
+**H12.** Given two lists of tags, `old_tags` and `new_tags`, write code producing (a) tags present in both, (b) tags only in `new_tags`, (c) all tags, deduplicated. Use set operations and return sorted lists for deterministic output.
 
 ## Group I — Conditionals and loops
 
@@ -1508,166 +1732,77 @@ while i:
 ```
 
 **I19.** Write a retry loop skeleton: `attempts` starts at 0; call `fetch()` at most 3 times; stop early if it returns a truthy result; after the loop, return the result or `None`. Use `while`, `break`, and truthiness.
-## 11. Comprehensions
 
-Comprehensions build a new collection from an iterable in one expression. They are central to idiomatic Python.
+## Group J — Comprehensions
 
-```python
-xs = [1, -2, 3, -4]
+**J1.** Predict the output: `[x * 2 for x in [1, 2, 3]]`.
 
-squares = [x * x for x in xs]                  # [1, 4, 9, 16]
-positives = [x for x in xs if x > 0]           # [1, 3]
-abs_values = [x if x > 0 else -x for x in xs]  # [1, 2, 3, 4]
-pairs = {x: x * x for x in range(3)}           # {0: 0, 1: 1, 2: 4}
-unique_lens = {len(w) for w in ["a", "bb", "c"]}  # {1, 2}
-flat = [c for word in ["ab", "cd"] for c in word]  # ["a", "b", "c", "d"]
-```
+**J2.** Predict the output: `[x for x in [4, -1, 5, -2] if x > 0]`.
 
-Reading order of a nested comprehension: the `for` clauses appear in the same order you would write nested loops; the expression on the left is the innermost body.
+**J3.** Predict both outputs:
 
 ```python
-matrix = [[1, 2], [3, 4]]
-flat = [n for row in matrix for n in row]   # [1, 2, 3, 4]
+print([x if x > 0 else -x for x in [4, -1, 5, -2]])
+print([-x if x > 0 else x for x in [4, -1]])
 ```
 
-Rules and guidance:
+**J4.** Given `keys = ["a", "b"]` and `values = [1, 2]`, write a dict comprehension producing `{"a": 1, "b": 2}`.
 
-- A conditional filter (`if x > 0`) goes after the `for`; an if/else expression goes *before* the `for`.
-- Comprehension variables live in their own scope and do not leak.
-- Prefer a comprehension to `map`/`filter` chains; Python's equivalents are less idiomatic for simple transformations.
-- Do not use comprehensions for side effects (`[print(x) for x in xs]` is an anti-pattern).
-- If the logic needs more than two `for`/`if` clauses, or nested conditionals, write a loop.
-- A **generator expression** looks identical with parentheses instead of brackets and is lazy — it produces values on demand and is consumed once:
+**J5.** Predict the output: `sorted({len(w) for w in ["a", "bb", "c", "ddd"]})`.
+
+**J6.** Predict the output: `[n for row in [[1, 2], [3]] for n in row]`.
+
+**J7.** Predict the output: `[(x, y) for x in [1, 2] for y in ["a", "b"]]`. Then state how the nested loops would be written as a normal `for` loop.
+
+**J8.** Predict both printed lines and explain why the second is not `1`:
 
 ```python
-total = sum(x * x for x in xs)   # no intermediate list is built
+x = "outer"
+print([x for x in range(2)])
+print(x)
 ```
 
-Generators get full treatment in Chapter 2; for now, use them where a function like `sum`, `any`, or `max` consumes an iterable.
-
----
-
-
-## 4. Booleans, `None`, and truthiness
-
-Booleans are capitalized: `True` and `False` (TypeScript's `true`/`false` do not exist). The null-like value is `None`.
-
-Python has a general notion of **truthiness**. These values are falsy:
-
-- `None`
-- `False`
-- `0`, `0.0`, `0j`
-- `""` (empty string)
-- `[]`, `()`, `{}`, `set()` (empty containers)
-
-Everything else is truthy, including `"0"`, `"False"`, `[0]`, and `" "`.
+**J9.** Rewrite this loop as a single comprehension:
 
 ```python
-if []:
-    print("never runs")
-if "False":
-    print("runs, because non-empty strings are truthy")
+result = []
+for n in range(10):
+    if n % 3 == 0:
+        result.append(n * n)
 ```
 
-Boolean operators return **operands**, not booleans:
+**J10.** Given `lines = ["  Alpha ", "BETA", " gamma "]`, write a comprehension producing `["alpha", "beta", "gamma"]`.
+
+**J11.** Predict the output: `sum(x * x for x in range(4))`. Explain what is different between this and `sum([x * x for x in range(4)])`.
+
+**J12.** Identify the anti-pattern and rewrite it correctly:
 
 ```python
-print(0 or "default")     # default
-print("a" and "b")        # b
-print("" or 0 or [])      # []     -- all falsy; returns the last one
-print("a" and "" and 5)   # ""     -- short-circuits at the first falsy
+[print(x) for x in [1, 2, 3]]
 ```
 
-This powers the default-value idiom, which has a trap with falsy-but-valid values:
+**J13.** Given records `[{"id": 1, "name": "a", "active": True}, {"id": 2, "name": "b", "active": False}, {"id": 3, "name": "c", "active": True}]`, write one dict comprehension mapping `id` to `name` for active records only.
+
+**J14.** Predict the output: `[x * y for x in range(3) if x for y in range(2)]`.
+
+**J15.** Rewrite this as one comprehension:
 
 ```python
-name = supplied or "anonymous"   # "" and 0 are replaced too!
+names = ["ada", "alan", "grace", "bob"]
+upper_long = []
+for name in names:
+    if len(name) > 3:
+        upper_long.append(name.upper())
 ```
 
-The safe version when `""` or `0` are valid inputs:
+**J16.** Write a comprehension that produces the uppercase first letters of words longer than three characters from `["api", "gateway", "ui", "cache"]`. Expected: `["A", "G", "C"]`.
+
+**J17.** Explain why this comprehension is a poor choice and rewrite it as a loop:
 
 ```python
-name = supplied if supplied is not None else "anonymous"
+logs = []
+[logs.extend(line.strip().split()) for line in ["a b", "c d"]]
 ```
-
-Comparison operators (`==`, `<`, `>=`, `!=`, `in`, `is`) produce actual booleans, which is why the distinction above matters.
-
-`None` checks use `is`, never `==`:
-
-```python
-result = None
-if result is None:
-    print("no result")
-```
-
-Functions that fall off the end return `None`. `print()` also returns `None` — a classic source of `x = print(...)` bugs.
-
-The conditional expression is written in the opposite order from TypeScript:
-
-```python
-status = "ok" if score >= 60 else "fail"
-```
-
-There is no `??` or `?.` operator. Use explicit `is None` checks or `dict.get`.
-
----
-
-
-
-## Group D — Booleans, `None`, and truthiness
-
-**D1.** Classify each as truthy or falsy: `0`, `"0"`, `[]`, `[0]`, `""`, `" "`, `None`, `{}`, `set()`, `-1`, `0.0`, `range(0)`.
-
-**D2.** Predict each: `bool(0.1)`, `bool("False")`, `bool([[]])`, `bool(range(1))`, `bool(None)`, `bool(-0.0)`.
-
-**D3.** Predict the output for `name = ""` and then for `name = 0`, and explain the difference between the two checks:
-
-```python
-if name is None:
-    print("None branch")
-if not name:
-    print("falsy branch")
-```
-
-**D4.** Predict all five lines:
-
-```python
-print(3 and 4)
-print(0 and 4)
-print(3 or 4)
-print(0 or 4)
-print([] or {} or "x")
-```
-
-**D5.** This default-value idiom is wrong when `port = 0` is a valid setting. Explain what happens and rewrite it correctly:
-
-```python
-port = settings.get("port") or 8080
-```
-
-**D6.** Write `display_name(user)` returning the user's `"name"` when it is a non-empty string, and `"anonymous"` otherwise. The name may be missing (use `None`), `""`, or a valid string.
-
-**D7.** Predict all four printed values:
-
-```python
-x = None
-print(x == None)
-print(x is None)
-print(x == False)
-print(bool(x))
-```
-
-**D8.** Predict each printed line:
-
-```python
-score = 55
-print("pass" if score >= 60 else "fail")
-x = 0
-print("zero" if not x else "nonzero")
-```
-
-**D9.** Write `is_valid(payload)` returning `True` only when `payload` is a non-empty dict whose `"id"` key exists and is a non-zero integer. No exceptions should escape the function.
-
 
 ## Group K — Functions and arguments
 
@@ -1800,69 +1935,6 @@ print(f(b=1, a=2, c=3))
 ```
 
 **K20.** Write `filter_kwargs(data, allowed)` that returns a new dict containing only the keys present in the `allowed` container. Example: `filter_kwargs({"a": 1, "b": 2, "debug": True}, ["a", "b"])` returns `{"a": 1, "b": 2}`. Use a dict comprehension.
-## 14. Scope
-
-Python resolves names with the **LEGB** rule: **L**ocal, **E**nclosing function, **G**lobal (module), **B**uilt-in.
-
-There is no block scope. Unlike TypeScript's `let`/`const`, a name assigned inside `if`, `for`, or `while` belongs to the enclosing function or module:
-
-```python
-for i in range(3):
-    pass
-print(i)            # 2 -- still defined
-
-if condition:
-    temp = 1
-print(temp)         # works (if the branch ran)
-```
-
-That makes loop variables and temporaries leak, unlike TypeScript.
-
-### Reading versus assigning
-
-Reading a global from a function works. Assigning to a name anywhere in a function makes it local for the *entire* function, which causes `UnboundLocalError` when read before assignment:
-
-```python
-counter = 0
-
-def bump():
-    counter += 1        # UnboundLocalError: local variable 'counter'
-
-def bump():
-    global counter      # explicit; use sparingly
-    counter += 1
-```
-
-For closures, `nonlocal` reassigns a name in the nearest enclosing function scope:
-
-```python
-def make_counter():
-    count = 0
-    def increment():
-        nonlocal count
-        count += 1
-        return count
-    return increment
-```
-
-### Other scope facts
-
-- Builtins (`list`, `id`, `sum`, `dict`, ...) can be shadowed. `list = [1, 2]` breaks `list("ab")` for the rest of that scope. Never do this.
-- Comprehension variables have their own scope and do not leak: after `[x for x in range(3)]`, `x` is undefined unless it existed before.
-- Functions capture variables, not values. Lambdas created in a loop all see the final value:
-
-```python
-funcs = [lambda: i for i in range(3)]
-print([f() for f in funcs])   # [2, 2, 2]
-```
-
-- `del name` removes the binding from the current namespace; it does not destroy the object while other names reference it.
-- Module-level code runs top to bottom at import time; function bodies run only when called. (Modules and imports are covered in Chapter 2.)
-
----
-
-
-
 
 ## Group L — Scope
 
@@ -1949,101 +2021,6 @@ print(outer()())
 **L11.** Write a counter two ways: once with `nonlocal`, and once with a single-element list as an accumulator (no `nonlocal`). Explain why the list version works.
 
 **L12.** Predict whether each statement raises and explain: accessing a local before assignment in the same function; reading a global in a function; reading a builtin after shadowing it in the same function.
-## 15. Idioms and common mistakes
-
-Idioms to adopt:
-
-- `if not xs:` / `if xs is None:` — pick the check that matches the meaning.
-- `enumerate`, `zip`, `items()` instead of index arithmetic.
-- `"".join(parts)` instead of repeated `+=` for strings.
-- `dict.get(key, default)` and `setdefault` for optional and grouped data.
-- Comprehensions instead of `map`/`filter` loops.
-- `a, b = b, a` swaps; star-unpacking for head/tail.
-- f-strings for all formatting.
-- `sorted(data, key=...)` instead of hand-written comparators.
-
-Mistakes to avoid:
-
-1. `xs = xs.sort()` — in-place methods return `None`.
-2. Mutable default arguments (`def f(x, acc=[])`).
-3. `[[0] * 3] * 3` — repeated aliases, not independent rows.
-4. Using `is` to compare values instead of `None`/sentinels.
-5. Expecting `/` to do integer division, or `%` to follow JavaScript sign rules.
-6. `"count: " + n` — no implicit string conversion.
-7. `{}` for an empty set; it is an empty dict.
-8. Mutating a list while iterating over it.
-9. Assuming loop variables disappear after the loop.
-10. Trusting `and`/`or` to return booleans rather than operands.
-11. Assuming `if name:` when `""` is a valid value.
-12. Forgetting the comma in one-element tuples.
-13. `int("3.5")` instead of `int(float("3.5"))`.
-14. Shadowing builtins such as `list`, `id`, `str`, `sum`.
-15. Function calls where `return` was intended, or vice versa.
-
----
-
-# Exercises
-
-Work each exercise before running code. Groups are ordered from recognition to implementation; within each group, difficulty increases. Do not look up answers — predict, run, and reconcile.
-
-## 5. Identity and equality
-
-Two operators that TypeScript does not separate:
-
-- `==` — **equality**: calls `__eq__`; same value.
-- `is` — **identity**: same object (`id(a) == id(b)`).
-
-```python
-a = [1, 2]
-b = [1, 2]
-c = a
-print(a == b)   # True  (equal contents)
-print(a is b)   # False (different objects)
-print(a is c)   # True  (same object)
-print(a == c)   # True
-```
-
-Rules of thumb:
-
-- Use `is` only with `None` and sentinel objects: `x is None`, `x is not None`.
-- Use `==` for everything else.
-- Do not use `is` to compare numbers or strings. CPython caches small ints (`-5..256`) and interns some strings, so `x is y` for equal values can be `True` or `False` depending on context. Never depend on it.
-
-```python
-x = 256
-y = 256
-print(x is y)   # True in CPython -- an implementation detail, not a language rule
-
-x = 1000
-y = 1000
-print(x is y)   # may be True or False depending on how the code was compiled
-```
-
-Some equality facts that differ from JavaScript:
-
-```python
-print(1 == 1.0)    # True   -- numeric comparison across types
-print(1 == True)   # True   -- bool is a subtype of int
-print(0 == False)  # True
-print("1" == 1)    # False  -- no coercion
-```
-
-`is` also appears in chained form, as do all comparisons. A chained comparison evaluates each operand once and means "pairwise and":
-
-```python
-x = 5
-print(1 < x < 10)          # True
-print(10 < x < 20)         # False
-names = []
-print(names == [])         # True (prefer 'if not names:' instead)
-```
-
-NaN is never equal to itself: `float("nan") == float("nan")` is `False`. Detect with `math.isnan`.
-
----
-
-
-
 
 ## Group M — Translating TypeScript patterns
 
@@ -2124,7 +2101,6 @@ const isOk = (code: number) => code === 200 || code === 201;
 console.log(statuses.includes(200), isOk(201));
 ```
 
-
 ## Group N — Mixed realistic tasks
 
 These combine several chapter concepts. Keep implementations small and idiomatic. Do not use any imports beyond the standard library, and only what the chapter covered.
@@ -2166,7 +2142,6 @@ These combine several chapter concepts. Keep implementations small and idiomatic
 **N18.** A JSON-like payload arrives as `{"user": {"id": 7, "roles": ["admin"]}, "meta": None}`. Write `safe_username(payload)` returning the username safe-access pattern result: `payload["user"]["name"]` if everything exists and is a non-empty string, otherwise `"unknown"`. Do not use `try`/`except` (Chapter 2 topic); use `get`, truthiness, and `isinstance`.
 
 ---
-
 
 ## Before moving on
 
