@@ -69,3 +69,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **practical development** — Check that chapter links resolve after renaming a file.
 - **curriculum index** — Update the documentation if the visible behavior changes.
 - **practical development** — Prefer small, focused changes over broad rewrites.
+- **ML foundations** — Keep commands copy-pasteable for new contributors.
