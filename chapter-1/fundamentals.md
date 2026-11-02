@@ -78,6 +78,141 @@ Everyday conventions:
 
 ---
 
+
+
+## Group A — Names, aliasing, identity, and mutability
+
+**A1.** Predict the output:
+
+```python
+a = [1, 2]
+b = a
+c = a[:]
+b.append(3)
+c.append(4)
+print(a, c)
+```
+
+**A2.** Predict the output:
+
+```python
+x = {"n": 1}
+y = x
+x["n"] = 2
+y = {"n": 3}
+print(x, y)
+```
+
+**A3.** Predict the output and explain why `xs` ends as it does:
+
+```python
+def add_item(items, item):
+    items.append(item)
+
+def replace(items):
+    items = []
+
+xs = [1]
+add_item(xs, 2)
+replace(xs)
+print(xs)
+```
+
+**A4.** The following code was meant to copy `original` so that mutating `copy` leaves `original` untouched, but it has a bug. Identify the bug and give two different fixes:
+
+```python
+original = [1, 2, 3]
+copy = original
+copy.append(4)
+print(original)
+```
+
+**A5.** For each pair, state whether `a is b`, `a == b`, both, or neither is `True`, and explain:
+
+```python
+a = [1, 2, 3]
+b = [1, 2, 3]
+```
+
+```python
+a = (1, 2)
+b = a
+```
+
+```python
+a = "hello"
+b = "hello"
+```
+
+**A6.** Predict the output:
+
+```python
+a = [1, 2, 3]
+b = a
+b = b + [4]
+b += [5]
+print(a, b)
+```
+
+**A7.** Predict both outputs:
+
+```python
+import copy
+
+a = [[1], [2]]
+b = a[:]
+c = copy.deepcopy(a)
+b[0].append(9)
+b.append([3])
+print(a)
+print(c)
+```
+
+**A8.** When run in a REPL, `a = 1000; b = 1000; a is b` may print `False`, yet `a = 256; b = 256; a is b` prints `True`. Explain both results and state the rule you should follow in your own code.
+
+**A9.** Predict the four printed booleans:
+
+```python
+a = [1]
+b = [1]
+c = a
+print(a is b, a is c, a == b, a == c)
+```
+
+**A10.** For each type, state whether values are mutable and whether the type is hashable: `int`, `str`, `list`, `tuple`, `dict`, `set`, `frozenset`, `bool`, `None`.
+
+**A11.** Fill in the blank four different ways such that `b` is a copy that can be mutated independently of `a` (shallow copies are acceptable unless stated otherwise):
+
+```python
+a = [[1, 2], [3, 4]]
+b = ______  # must not be "a"
+```
+
+**A12.** One of the following statements succeeds and the other raises. Identify which is which, give the exact exception type, and explain the difference:
+
+```python
+t = (1, [2, 3])
+t[1].append(4)
+t[0] = 9
+```
+
+**A13.** Write a function `same_object(a, b)` that returns `True` when the two arguments are the same object, implemented (a) with `id()` and (b) with `is`. State which one you would actually use.
+
+**A14.** Predict the output:
+
+```python
+a = 5
+b = a
+a += 1
+print(a, b)
+```
+
+**A15.** Explain why this function does not modify the caller's list, then rewrite it so it does:
+
+```python
+def clear_all(xs):
+    xs = []
+```
 ## 2. Numbers
 
 Two everyday numeric types:
@@ -556,141 +691,6 @@ NaN is never equal to itself: `float("nan") == float("nan")` is `False`. Detect 
 
 ---
 
-
-
-## Group A — Names, aliasing, identity, and mutability
-
-**A1.** Predict the output:
-
-```python
-a = [1, 2]
-b = a
-c = a[:]
-b.append(3)
-c.append(4)
-print(a, c)
-```
-
-**A2.** Predict the output:
-
-```python
-x = {"n": 1}
-y = x
-x["n"] = 2
-y = {"n": 3}
-print(x, y)
-```
-
-**A3.** Predict the output and explain why `xs` ends as it does:
-
-```python
-def add_item(items, item):
-    items.append(item)
-
-def replace(items):
-    items = []
-
-xs = [1]
-add_item(xs, 2)
-replace(xs)
-print(xs)
-```
-
-**A4.** The following code was meant to copy `original` so that mutating `copy` leaves `original` untouched, but it has a bug. Identify the bug and give two different fixes:
-
-```python
-original = [1, 2, 3]
-copy = original
-copy.append(4)
-print(original)
-```
-
-**A5.** For each pair, state whether `a is b`, `a == b`, both, or neither is `True`, and explain:
-
-```python
-a = [1, 2, 3]
-b = [1, 2, 3]
-```
-
-```python
-a = (1, 2)
-b = a
-```
-
-```python
-a = "hello"
-b = "hello"
-```
-
-**A6.** Predict the output:
-
-```python
-a = [1, 2, 3]
-b = a
-b = b + [4]
-b += [5]
-print(a, b)
-```
-
-**A7.** Predict both outputs:
-
-```python
-import copy
-
-a = [[1], [2]]
-b = a[:]
-c = copy.deepcopy(a)
-b[0].append(9)
-b.append([3])
-print(a)
-print(c)
-```
-
-**A8.** When run in a REPL, `a = 1000; b = 1000; a is b` may print `False`, yet `a = 256; b = 256; a is b` prints `True`. Explain both results and state the rule you should follow in your own code.
-
-**A9.** Predict the four printed booleans:
-
-```python
-a = [1]
-b = [1]
-c = a
-print(a is b, a is c, a == b, a == c)
-```
-
-**A10.** For each type, state whether values are mutable and whether the type is hashable: `int`, `str`, `list`, `tuple`, `dict`, `set`, `frozenset`, `bool`, `None`.
-
-**A11.** Fill in the blank four different ways such that `b` is a copy that can be mutated independently of `a` (shallow copies are acceptable unless stated otherwise):
-
-```python
-a = [[1, 2], [3, 4]]
-b = ______  # must not be "a"
-```
-
-**A12.** One of the following statements succeeds and the other raises. Identify which is which, give the exact exception type, and explain the difference:
-
-```python
-t = (1, [2, 3])
-t[1].append(4)
-t[0] = 9
-```
-
-**A13.** Write a function `same_object(a, b)` that returns `True` when the two arguments are the same object, implemented (a) with `id()` and (b) with `is`. State which one you would actually use.
-
-**A14.** Predict the output:
-
-```python
-a = 5
-b = a
-a += 1
-print(a, b)
-```
-
-**A15.** Explain why this function does not modify the caller's list, then rewrite it so it does:
-
-```python
-def clear_all(xs):
-    xs = []
-```
 ## 6. Lists
 
 Lists are mutable, ordered, heterogeneous sequences — the Python workhorse for ordered collections.
