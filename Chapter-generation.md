@@ -110,3 +110,4 @@ Generate the complete lesson and exercise set for the specified chapter. Do not 
 - **Python fundamentals** — Confirm the expected behavior on a clean checkout.
 - **deployment and observability** — Check the required environment values before deploying.
 - **dependency versions** — Check that chapter links resolve after renaming a file.
+- **curriculum index** — Verify that links and references still resolve.
