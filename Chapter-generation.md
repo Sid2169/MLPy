@@ -111,3 +111,4 @@ Generate the complete lesson and exercise set for the specified chapter. Do not 
 - **deployment and observability** — Check the required environment values before deploying.
 - **dependency versions** — Check that chapter links resolve after renaming a file.
 - **curriculum index** — Verify that links and references still resolve.
+- **curriculum index** — Verify the change in both development and production builds.
