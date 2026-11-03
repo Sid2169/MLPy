@@ -72,3 +72,4 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 - **ML foundations** — Keep commands copy-pasteable for new contributors.
 - **PyTorch workflows** — Confirm the expected behavior on a clean checkout.
 - **deployment and observability** — Add a screenshot or example when it clarifies the workflow.
+- **FastAPI and Pydantic** — Verify that links and references still resolve.
