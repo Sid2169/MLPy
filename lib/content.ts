@@ -98,12 +98,19 @@ export function discoverChapterFiles(): ChapterFile[] {
   return chapters.sort((a, b) => a.number - b.number);
 }
 
+// The shared layout requests all chapter metadata for every practice page.
+// Reuse parsing across those renders, but compare source text so development
+// edits and content updates are never hidden by an indefinitely stale cache.
+const chapterMetaCache = new Map<string, { source: string; meta: ChapterMeta }>();
+
 function buildChapterMeta(source: string, file: ChapterFile): ChapterMeta {
+  const cached = chapterMetaCache.get(file.absolutePath);
+  if (cached?.source === source) return cached.meta;
   const { fullTitle, title, body } = splitDocumentTitle(source);
   const parsed = parseMarkdown(body);
   const readingMinutes = Math.max(1, Math.round(parsed.wordCount / 200));
 
-  return {
+  const meta: ChapterMeta = {
     number: file.number,
     slug: file.slug,
     title: title || fullTitle,
@@ -119,6 +126,8 @@ function buildChapterMeta(source: string, file: ChapterFile): ChapterMeta {
     wordCount: parsed.wordCount,
     readingMinutes,
   };
+  chapterMetaCache.set(file.absolutePath, { source, meta });
+  return meta;
 }
 
 export function getChapterMetas(): ChapterMeta[] {

@@ -17,7 +17,7 @@ export function ChapterReset({ chapterSlug }: { chapterSlug: string }) {
       onClick={() => {
         if (
           window.confirm(
-            "Reset all exercise progress and notes for this chapter?",
+            "Reset all exercise progress, notes, and saved code/workspaces for this chapter?",
           )
         ) {
           resetChapter(chapterSlug);

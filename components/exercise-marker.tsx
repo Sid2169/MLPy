@@ -1,7 +1,9 @@
 "use client";
 
 import { Link2, StickyNote } from "lucide-react";
+import Link from "next/link";
 import { useProgress } from "@/components/progress-provider";
+import { exerciseDraftKey } from "@/lib/learning-state";
 
 type ExerciseMarkerProps = {
   chapterSlug: string;
@@ -20,6 +22,7 @@ export function ExerciseMarker({
     toggleExercise,
     hasNote,
     openNote,
+    visitExercise, started,
   } = useProgress();
   const complete = isExerciseComplete(chapterSlug, exerciseId);
   const noted = hasNote(chapterSlug, exerciseId);
@@ -35,16 +38,25 @@ export function ExerciseMarker({
           type="checkbox"
           checked={complete}
           disabled={!hydrated}
-          onChange={() => toggleExercise(chapterSlug, exerciseId)}
+          onChange={() => {
+            visitExercise(chapterSlug, exerciseId, label);
+            toggleExercise(chapterSlug, exerciseId);
+          }}
           className="exercise-checkbox"
           aria-label={`Mark exercise ${label} complete`}
         />
         <span className="exercise-marker-id">{label}</span>
         <span className="exercise-marker-text">
-          {complete ? "Complete" : "Mark complete"}
+          {complete ? "Complete" : started[exerciseDraftKey(chapterSlug, exerciseId)] ? "In progress · mark complete" : "Mark complete"}
         </span>
       </label>
       <div className="exercise-marker-actions">
+        {chapterSlug === "fundamentals" ? <Link
+          href={`/practice/fundamentals/${exerciseId}`}
+          className="exercise-icon-button text-xs"
+          onClick={() => visitExercise(chapterSlug, exerciseId, label)}
+          aria-label={`Open workspace for exercise ${label}`}
+        >Open workspace</Link> : null}
         <button
           type="button"
           className="exercise-icon-button"

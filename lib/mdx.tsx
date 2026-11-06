@@ -1,4 +1,7 @@
 import type { ReactElement } from "react";
+import { createHash } from "node:crypto";
+import type { Root } from "hast";
+import { visit } from "unist-util-visit";
 import { compileMDX } from "next-mdx-remote/rsc";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import rehypePrettyCode from "rehype-pretty-code";
@@ -11,13 +14,41 @@ import {
   remarkRewriteLinks,
 } from "@/lib/markdown";
 import type { ChapterMeta } from "@/lib/types";
+import { createAsyncCache } from "@/lib/async-cache";
+
+const compiledMarkdown = createAsyncCache<ReactElement>(24);
+
+// IDs belong to the compiled document, not a mutable render-time counter.
+// This keeps saved snippet drafts stable when a cached tree renders again.
+function rehypeSnippetIds() {
+  return (tree: Root) => {
+    let index = 0;
+    visit(tree, "element", (node) => {
+      if (node.tagName === "pre") node.properties["data-snippet-id"] = String(index++);
+    });
+  };
+}
 
 export type RenderMarkdownOptions = {
   chapter?: ChapterMeta;
   linkMap: Record<string, string>;
+  interactiveCode?: boolean;
 };
 
 export async function renderMarkdown(
+  source: string,
+  options: RenderMarkdownOptions,
+): Promise<ReactElement> {
+  const key = createHash("sha256").update(JSON.stringify({
+    source,
+    chapter: options.chapter ? [options.chapter.number, options.chapter.slug] : null,
+    linkMap: options.linkMap,
+    interactiveCode: options.interactiveCode ?? true,
+  })).digest("hex");
+  return compiledMarkdown(key, () => compileMarkdown(source, options));
+}
+
+async function compileMarkdown(
   source: string,
   options: RenderMarkdownOptions,
 ): Promise<ReactElement> {
@@ -66,12 +97,14 @@ export async function renderMarkdown(
         defaultLang: "text",
       },
     ],
+    rehypeSnippetIds,
   ];
 
   const { content } = await compileMDX({
     source,
     components: createMdxComponents({
       chapter: options.chapter,
+      interactiveCode: options.interactiveCode,
     }),
     options: {
       parseFrontmatter: false,
