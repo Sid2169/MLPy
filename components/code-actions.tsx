@@ -89,9 +89,11 @@ export function CodeActions({ language, snippetId, originalSource }: CodeActions
   }, [codeText, editedCode]);
 
   const finishEditing = useCallback(() => {
-    setEditedCode(draft === codeText() ? null : draft);
+    const unchanged = draft === codeText();
+    setEditedCode(unchanged ? null : draft);
+    if (unchanged) deleteDraft(draftKey);
     setEditing(false);
-  }, [codeText, draft]);
+  }, [codeText, draft, deleteDraft, draftKey]);
 
   const resetCode = useCallback(() => {
     setEditing(false);

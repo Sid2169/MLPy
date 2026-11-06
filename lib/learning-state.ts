@@ -4,6 +4,9 @@ export type WorkspaceDraft = {
   activeFile: string;
   entrypoint: string;
   stdin: string;
+  packages?: string[];
+  packageInput?: string;
+  mode?: "script" | "notebook";
   sourceRevision?: string;
   updatedAt: number;
 };
@@ -37,7 +40,17 @@ export function migrateLearningState(value: unknown): LearningState {
   if (data.version === 2) {
     for (const [key, draft] of Object.entries(data.drafts ?? {})) {
       if (draft && strings(draft.files) && typeof draft.answer === "string" && typeof draft.activeFile === "string") {
-        empty.drafts[key] = { ...draft, entrypoint: draft.entrypoint ?? draft.activeFile, stdin: draft.stdin ?? "" };
+        const activeFile = Object.hasOwn(draft.files, draft.activeFile) ? draft.activeFile : Object.keys(draft.files)[0];
+        if (!activeFile) continue;
+        empty.drafts[key] = {
+          ...draft, activeFile,
+          entrypoint: typeof draft.entrypoint === "string" ? draft.entrypoint : activeFile,
+          stdin: typeof draft.stdin === "string" ? draft.stdin : "",
+          packageInput: typeof draft.packageInput === "string" ? draft.packageInput : undefined,
+          packages: Array.isArray(draft.packages) ? draft.packages.filter((name) => typeof name === "string") : [],
+          mode: draft.mode === "notebook" ? "notebook" : "script",
+          updatedAt: typeof draft.updatedAt === "number" ? draft.updatedAt : 0,
+        };
       }
     }
     for (const [key, started] of Object.entries(data.started ?? {})) {

@@ -10,7 +10,7 @@ describe("learning storage migration", () => {
   });
   it("round trips multi-file drafts, written answers, and resume position", () => {
     const state = emptyLearningState();
-    state.drafts["exercise:fundamentals:ch1-A1"] = { files: { "main.py": "print('hi')", "data.txt": "hello" }, activeFile: "main.py", entrypoint: "main.py", answer: "My prediction", stdin: "hello\n", updatedAt: 10 };
+    state.drafts["exercise:fundamentals:ch1-A1"] = { files: { "main.py": "print('hi')", "data.txt": "hello" }, activeFile: "main.py", entrypoint: "main.py", answer: "My prediction", stdin: "hello\n", packages: [], mode: "script", updatedAt: 10 };
     state.lastVisited = { chapterSlug: "fundamentals", exerciseId: "ch1-A1", label: "A1" };
     expect(migrateLearningState(JSON.parse(JSON.stringify(state)))).toEqual(state);
   });

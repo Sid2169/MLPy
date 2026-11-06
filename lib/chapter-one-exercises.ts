@@ -38,5 +38,5 @@ export function initialExerciseDraft(exercise: ExerciseDefinition): WorkspaceDra
   }
   // This task explicitly refers back to L2; provide only its buggy given code.
   if (exercise.label === "L3") files["main.py"] = "count = 0\n\ndef inc():\n    count += 1\n\ninc()\n";
-  return { files, activeFile: "main.py", entrypoint: "main.py", answer: "", stdin: "", sourceRevision: exercise.source, updatedAt: 0 };
+  return { files, activeFile: "main.py", entrypoint: "main.py", answer: "", stdin: "", packages: [], mode: "script", sourceRevision: exercise.source, updatedAt: 0 };
 }

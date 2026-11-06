@@ -2,14 +2,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getChapter, getChapterLinkMap } from "@/lib/content";
-import { extractExercises } from "@/lib/exercises";
+import { extractExercises, type ExerciseDefinition } from "@/lib/exercises";
 import { initialExerciseDraft, interactionFor } from "@/lib/chapter-one-exercises";
 import { renderMarkdown } from "@/lib/mdx";
 import { ExerciseWorkspace } from "@/components/exercise-workspace";
 
+let exerciseCache: ExerciseDefinition[] | undefined;
 function getExercises() {
+  if (process.env.NODE_ENV === "production" && exerciseCache) return exerciseCache;
   const chapter = getChapter("fundamentals");
-  return chapter ? extractExercises(chapter.body, 1, chapter.slug) : [];
+  const exercises = chapter ? extractExercises(chapter.body, 1, chapter.slug) : [];
+  if (process.env.NODE_ENV === "production") exerciseCache = exercises;
+  return exercises;
 }
 
 export const dynamicParams = false;
