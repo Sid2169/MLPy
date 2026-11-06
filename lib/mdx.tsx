@@ -15,6 +15,7 @@ import type { ChapterMeta } from "@/lib/types";
 export type RenderMarkdownOptions = {
   chapter?: ChapterMeta;
   linkMap: Record<string, string>;
+  interactiveCode?: boolean;
 };
 
 export async function renderMarkdown(
@@ -72,6 +73,7 @@ export async function renderMarkdown(
     source,
     components: createMdxComponents({
       chapter: options.chapter,
+      interactiveCode: options.interactiveCode,
     }),
     options: {
       parseFrontmatter: false,

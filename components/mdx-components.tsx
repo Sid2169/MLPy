@@ -17,6 +17,7 @@ type ParagraphProps = ComponentPropsWithoutRef<"p"> & {
 
 type PreProps = ComponentPropsWithoutRef<"pre"> & {
   snippetId?: string;
+  interactiveCode?: boolean;
   "data-language"?: string;
   "data-theme"?: string;
 };
@@ -145,7 +146,7 @@ function Anchor({
   );
 }
 
-function Pre({ children, className, snippetId, ...props }: PreProps) {
+function Pre({ children, className, snippetId, interactiveCode = true, ...props }: PreProps) {
   const language = props["data-language"] ?? "text";
 
   return (
@@ -157,7 +158,7 @@ function Pre({ children, className, snippetId, ...props }: PreProps) {
       <pre className={clsx("shiki", className)} {...props}>
         {children}
       </pre>
-      <CodeActions language={language} snippetId={snippetId} originalSource={nodeText(children)} />
+      {interactiveCode ? <CodeActions language={language} snippetId={snippetId} originalSource={nodeText(children)} /> : null}
     </div>
   );
 }
@@ -170,7 +171,7 @@ function Table({ children, ...props }: ComponentPropsWithoutRef<"table">) {
   );
 }
 
-export function createMdxComponents({ chapter }: { chapter?: ChapterMeta }) {
+export function createMdxComponents({ chapter, interactiveCode = true }: { chapter?: ChapterMeta; interactiveCode?: boolean }) {
   void chapter;
   let snippetIndex = 0;
 
@@ -193,7 +194,7 @@ export function createMdxComponents({ chapter }: { chapter?: ChapterMeta }) {
     h3: Subheading,
     p: Paragraph,
     a: Anchor,
-    pre: (props: PreProps) => <Pre {...props} snippetId={String(snippetIndex++)} />,
+    pre: (props: PreProps) => <Pre {...props} interactiveCode={interactiveCode} snippetId={String(snippetIndex++)} />,
     table: Table,
   };
 }

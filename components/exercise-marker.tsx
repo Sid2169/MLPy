@@ -1,6 +1,7 @@
 "use client";
 
 import { Link2, StickyNote } from "lucide-react";
+import Link from "next/link";
 import { useProgress } from "@/components/progress-provider";
 import { exerciseDraftKey } from "@/lib/learning-state";
 
@@ -50,6 +51,12 @@ export function ExerciseMarker({
         </span>
       </label>
       <div className="exercise-marker-actions">
+        {chapterSlug === "fundamentals" ? <Link
+          href={`/practice/fundamentals/${exerciseId}`}
+          className="exercise-icon-button text-xs"
+          onClick={() => visitExercise(chapterSlug, exerciseId, label)}
+          aria-label={`Open workspace for exercise ${label}`}
+        >Open workspace</Link> : null}
         <button
           type="button"
           className="exercise-icon-button"
