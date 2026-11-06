@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/components/navigation-link";
+import { useNavigate } from "@/components/navigation-provider";
 import clsx from "clsx";
 import { ArrowUpRight, Loader2, Search, X } from "lucide-react";
 import type MiniSearch from "minisearch";
@@ -22,7 +22,7 @@ type SearchResult = {
 type MiniSearchInstance = MiniSearch<SearchDocument>;
 
 export function SearchDialog() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -146,9 +146,9 @@ export function SearchDialog() {
   const goToResult = useCallback(
     (result: SearchResult) => {
       close();
-      router.push(`${result.route}${result.anchor ? `#${result.anchor}` : ""}`);
+      navigate(`${result.route}${result.anchor ? `#${result.anchor}` : ""}`);
     },
-    [close, router],
+    [close, navigate],
   );
 
   const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {

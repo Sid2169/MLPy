@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { ThemeProvider } from "next-themes";
 import { ProgressProvider } from "@/components/progress-provider";
+import { NavigationProvider } from "@/components/navigation-provider";
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
@@ -12,7 +13,7 @@ export function Providers({ children }: { children: ReactNode }) {
       enableSystem
       disableTransitionOnChange
     >
-      <ProgressProvider>{children}</ProgressProvider>
+      <NavigationProvider><ProgressProvider>{children}</ProgressProvider></NavigationProvider>
     </ThemeProvider>
   );
 }

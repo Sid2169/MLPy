@@ -150,6 +150,60 @@ body {
 
 /* Prose refinements */
 
+.navigation-feedback {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.navigation-progress-track {
+  height: 3px;
+  overflow: hidden;
+  background: rgb(199 210 254 / 0.5);
+}
+
+.navigation-progress-bar {
+  height: 100%;
+  width: 40%;
+  background: #6366f1;
+  animation: navigation-progress 1s ease-in-out infinite;
+}
+
+.navigation-loading-label {
+  position: absolute;
+  top: 0.65rem;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transform: translateX(-50%);
+  border: 1px solid rgb(199 210 254);
+  border-radius: 0.65rem;
+  padding: 0.5rem 0.85rem;
+  background: white;
+  color: rgb(67 56 202);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 0.1);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dark .navigation-loading-label {
+  border-color: rgb(49 46 129);
+  background: rgb(15 23 42);
+  color: rgb(199 210 254);
+}
+
+@keyframes navigation-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(350%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navigation-progress-bar { width: 100%; animation: none; }
+}
+
 .prose {
   --tw-prose-body: rgb(51 65 85);
   --tw-prose-headings: rgb(15 23 42);

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/navigation-link";
 import { getChapterMetas } from "@/lib/content";
 import { SiteHeader } from "@/components/site-header";
 import {

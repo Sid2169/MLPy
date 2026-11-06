@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/navigation-link";
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import { ChapterProgress } from "@/components/chapter-progress";
 

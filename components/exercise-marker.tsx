@@ -1,7 +1,7 @@
 "use client";
 
 import { Link2, StickyNote } from "lucide-react";
-import Link from "next/link";
+import Link from "@/components/navigation-link";
 import { useProgress } from "@/components/progress-provider";
 import { exerciseDraftKey } from "@/lib/learning-state";
 

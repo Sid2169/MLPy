@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/components/navigation-link";
 import { notFound } from "next/navigation";
 import { ArrowDown, Clock, FileText, ListChecks } from "lucide-react";
 import { ChapterFooter } from "@/components/chapter-footer";

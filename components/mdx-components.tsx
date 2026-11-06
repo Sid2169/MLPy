@@ -3,7 +3,7 @@ import type {
   ComponentPropsWithoutRef,
   ReactNode,
 } from "react";
-import Link from "next/link";
+import Link from "@/components/navigation-link";
 import clsx from "clsx";
 import { CodeActions } from "@/components/code-actions";
 import { ExerciseMarker } from "@/components/exercise-marker";
