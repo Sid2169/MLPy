@@ -496,43 +496,107 @@ body {
   backdrop-filter: none;
 }
 
+.code-editor-shell,
+.code-editor-preview {
+  overflow: hidden;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.8rem;
+  background: rgb(248 250 252);
+  color: #24292e;
+}
+
+.code-editor-shell {
+  position: relative;
+}
+
 .code-editor,
+.code-editor-highlight,
 .code-editor-preview {
   display: block;
   width: 100%;
   margin: 0;
   overflow-x: auto;
-  border: 1px solid rgb(226 232 240);
-  border-radius: 0.8rem;
-  background: rgb(248 250 252);
   padding: 1rem 1.1rem;
-  color: rgb(30 41 59);
   font-family: var(--font-mono);
   font-size: 0.8rem;
+  font-weight: 400;
+  font-style: normal;
+  font-variant-ligatures: none;
   line-height: 1.7;
+  letter-spacing: normal;
   tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .code-editor {
+  position: relative;
   min-height: 7rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  caret-color: #24292e;
   outline: none;
   resize: vertical;
 }
 
-.code-editor:focus {
+.code-editor-shell:focus-within {
   border-color: rgb(99 102 241);
   box-shadow: 0 0 0 2px rgb(99 102 241 / 0.2);
 }
 
-.code-editor-preview {
-  white-space: pre;
+.code-editor-highlight {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  pointer-events: none;
+  user-select: none;
 }
 
-.dark .code-editor,
+.code-editor-highlight code,
+.code-editor-preview code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  font: inherit;
+}
+
+.code-editor-shell[data-highlighted="true"] .code-editor-highlight {
+  visibility: visible;
+}
+
+.code-editor-shell[data-highlighted="true"] .code-editor {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.code-editor-shell[data-highlighted="true"] .code-editor::selection {
+  background: rgb(165 180 252 / 0.4);
+  color: transparent;
+}
+
+.dark .code-editor-shell,
 .dark .code-editor-preview {
   border-color: rgb(30 41 59);
   background: rgb(15 23 42);
-  color: rgb(226 232 240);
+  color: #e1e4e8;
+}
+
+.dark .code-editor {
+  caret-color: #e1e4e8;
+}
+
+.dark .code-editor-shell:focus-within {
+  border-color: rgb(99 102 241);
+}
+
+.dark .code-editor-shell[data-highlighted="true"] .code-editor::selection {
+  background: rgb(99 102 241 / 0.4);
 }
 
 .code-frame > pre [data-line] {
@@ -629,6 +693,11 @@ body {
 .dark .code-output {
   border-color: rgb(30 41 59);
   background: rgb(2 6 23);
+}
+
+.code-editor-shell + .code-output,
+.code-editor-preview + .code-output {
+  margin-top: 0;
 }
 
 .code-output-header {
@@ -810,6 +879,7 @@ details[open] > summary {
   }
 
   .code-editor,
+  .code-editor-highlight,
   .code-editor-preview {
     font-size: 0.75rem;
     padding: 0.9rem;

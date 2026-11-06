@@ -12,6 +12,7 @@ import {
   Square,
   Terminal,
 } from "lucide-react";
+import { CodeEditor } from "@/components/code-editor";
 import { runPython, stopPython } from "@/lib/pyodide-client";
 
 type CodeActionsProps = {
@@ -38,7 +39,7 @@ export function CodeActions({ language }: CodeActionsProps) {
 
   const codeText = useCallback(() => {
     const frame = frameRef.current?.closest("[data-code-frame]");
-    return frame?.querySelector("code")?.textContent ?? "";
+    return frame?.querySelector(":scope > pre code")?.textContent ?? "";
   }, []);
 
   const readCode = useCallback(() => {
@@ -237,52 +238,15 @@ export function CodeActions({ language }: CodeActionsProps) {
         ) : null}
       </div>
 
-      {editing ? (
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Tab") {
-              event.preventDefault();
-              const target = event.currentTarget;
-              const start = target.selectionStart;
-              const end = target.selectionEnd;
-              setDraft(`${draft.slice(0, start)}  ${draft.slice(end)}`);
-              requestAnimationFrame(() => {
-                target.selectionStart = start + 2;
-                target.selectionEnd = start + 2;
-              });
-              return;
-            }
-
-            if (
-              runnable &&
-              (event.metaKey || event.ctrlKey) &&
-              event.key === "Enter"
-            ) {
-              event.preventDefault();
-              run();
-              return;
-            }
-
-            if (event.key === "Escape") {
-              event.preventDefault();
-              finishEditing();
-            }
-          }}
-          rows={Math.min(30, Math.max(6, draft.split("\n").length))}
-          className="code-editor"
-          aria-label="Edit code block"
-          autoFocus
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          wrap="off"
+      {active ? (
+        <CodeEditor
+          value={editing ? draft : editedCode ?? ""}
+          language={normalizedLanguage}
+          editing={editing}
+          onChange={setDraft}
+          onFinish={finishEditing}
+          onRun={runnable ? run : undefined}
         />
-      ) : editedCode !== null ? (
-        <pre className="code-editor-preview" tabIndex={0}>
-          {editedCode}
-        </pre>
       ) : null}
 
       {runnable && (hasOutput || statusText) ? (
