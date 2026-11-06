@@ -2,6 +2,7 @@
 
 import { Link2, StickyNote } from "lucide-react";
 import { useProgress } from "@/components/progress-provider";
+import { exerciseDraftKey } from "@/lib/learning-state";
 
 type ExerciseMarkerProps = {
   chapterSlug: string;
@@ -20,6 +21,7 @@ export function ExerciseMarker({
     toggleExercise,
     hasNote,
     openNote,
+    visitExercise, started,
   } = useProgress();
   const complete = isExerciseComplete(chapterSlug, exerciseId);
   const noted = hasNote(chapterSlug, exerciseId);
@@ -35,13 +37,16 @@ export function ExerciseMarker({
           type="checkbox"
           checked={complete}
           disabled={!hydrated}
-          onChange={() => toggleExercise(chapterSlug, exerciseId)}
+          onChange={() => {
+            visitExercise(chapterSlug, exerciseId, label);
+            toggleExercise(chapterSlug, exerciseId);
+          }}
           className="exercise-checkbox"
           aria-label={`Mark exercise ${label} complete`}
         />
         <span className="exercise-marker-id">{label}</span>
         <span className="exercise-marker-text">
-          {complete ? "Complete" : "Mark complete"}
+          {complete ? "Complete" : started[exerciseDraftKey(chapterSlug, exerciseId)] ? "In progress · mark complete" : "Mark complete"}
         </span>
       </label>
       <div className="exercise-marker-actions">

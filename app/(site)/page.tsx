@@ -7,6 +7,7 @@ import {
 } from "@/lib/content";
 import { renderMarkdown } from "@/lib/mdx";
 import { ChapterGrid } from "@/components/chapter-grid";
+import { ResumeLearning } from "@/components/resume-learning";
 
 export default async function HomePage() {
   const [home, chapters] = [getHomeContent(), getChapterMetas()];
@@ -43,6 +44,7 @@ export default async function HomePage() {
           </div>
 
           <div className="mt-7 flex flex-wrap items-center gap-3">
+            <ResumeLearning />
             <Link
               href={`/chapters/${chapters[0]?.slug ?? "fundamentals"}`}
               className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"

@@ -13,10 +13,14 @@ import {
   Terminal,
 } from "lucide-react";
 import { CodeEditor } from "@/components/code-editor";
+import { usePathname } from "next/navigation";
+import { useProgress } from "@/components/progress-provider";
 import { runPython, stopPython } from "@/lib/pyodide-client";
 
 type CodeActionsProps = {
   language?: string;
+  snippetId?: string;
+  originalSource?: string;
 };
 
 type OutputLine = {
@@ -24,7 +28,10 @@ type OutputLine = {
   text: string;
 };
 
-export function CodeActions({ language }: CodeActionsProps) {
+export function CodeActions({ language, snippetId, originalSource }: CodeActionsProps) {
+  const pathname = usePathname();
+  const { hydrated, drafts, saveDraft, deleteDraft, storageStatus } = useProgress();
+  const draftKey = `snippet:${pathname}:${snippetId}`;
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [running, setRunning] = useState(false);
@@ -41,6 +48,19 @@ export function CodeActions({ language }: CodeActionsProps) {
     const frame = frameRef.current?.closest("[data-code-frame]");
     return frame?.querySelector(":scope > pre code")?.textContent ?? "";
   }, []);
+
+  useEffect(() => {
+    if (!hydrated || snippetId === undefined) return;
+    setEditedCode(drafts[draftKey]?.files.main ?? null);
+  }, [hydrated, snippetId, draftKey, drafts]);
+
+  const updateDraft = useCallback((value: string) => {
+    setDraft(value);
+    if (snippetId !== undefined) saveDraft(draftKey, {
+      files: { main: value }, answer: "", activeFile: "main", entrypoint: "main", stdin: "",
+      sourceRevision: drafts[draftKey]?.sourceRevision ?? codeText(), updatedAt: Date.now(),
+    });
+  }, [snippetId, saveDraft, draftKey, drafts, codeText]);
 
   const readCode = useCallback(() => {
     if (editing) {
@@ -78,7 +98,8 @@ export function CodeActions({ language }: CodeActionsProps) {
     setEditedCode(null);
     setDraft("");
     setOutput([]);
-  }, []);
+    deleteDraft(draftKey);
+  }, [deleteDraft, draftKey]);
 
   const copy = useCallback(async () => {
     const text = readCode();
@@ -214,6 +235,7 @@ export function CodeActions({ language }: CodeActionsProps) {
           type="button"
           className="code-toolbar-button"
           onClick={editing ? finishEditing : startEditing}
+          disabled={!hydrated}
           aria-label={editing ? "Finish editing code" : "Edit code"}
           title={editing ? "Done editing" : "Edit code"}
         >
@@ -239,14 +261,20 @@ export function CodeActions({ language }: CodeActionsProps) {
       </div>
 
       {active ? (
+        <>
+        {drafts[draftKey]?.sourceRevision !== undefined && drafts[draftKey].sourceRevision !== originalSource ? (
+          <p className="text-xs text-amber-700 dark:text-amber-300">The original snippet changed. Your saved draft is preserved; Reset loads the new original.</p>
+        ) : null}
         <CodeEditor
           value={editing ? draft : editedCode ?? ""}
           language={normalizedLanguage}
           editing={editing}
-          onChange={setDraft}
+          onChange={updateDraft}
           onFinish={finishEditing}
           onRun={runnable ? run : undefined}
         />
+        <p className="mt-1 text-xs text-slate-500" role="status">{storageStatus}</p>
+        </>
       ) : null}
 
       {runnable && (hasOutput || statusText) ? (

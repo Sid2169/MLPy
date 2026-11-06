@@ -11,14 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import { X } from "lucide-react";
-
-const STORAGE_KEY = "mlpy:progress:v1";
-
-type StoredProgress = {
-  version: 1;
-  completed: Record<string, string[]>;
-  notes: Record<string, string>;
-};
+import { emptyLearningState, exerciseDraftKey, type LearningState, type WorkspaceDraft } from "@/lib/learning-state";
+import { loadLearningState, saveLearningState } from "@/lib/learning-storage";
 
 type NoteTarget = {
   key: string;
@@ -28,6 +22,14 @@ type NoteTarget = {
 };
 
 type ProgressContextValue = {
+  drafts: LearningState["drafts"];
+  started: LearningState["started"];
+  lastVisited: LearningState["lastVisited"];
+  storageStatus: string;
+  saveDraft: (key: string, draft: WorkspaceDraft) => void;
+  deleteDraft: (key: string) => void;
+  visitExercise: (chapterSlug: string, exerciseId: string, label: string) => void;
+  startExercise: (chapterSlug: string, exerciseId: string) => void;
   hydrated: boolean;
   completed: Record<string, string[]>;
   getCompletedCount: (
@@ -47,39 +49,24 @@ type ProgressContextValue = {
   resetAll: () => void;
 };
 
-const emptyProgress: StoredProgress = {
-  version: 1,
-  completed: {},
-  notes: {},
-};
-
 const ProgressContext = createContext<ProgressContextValue | null>(null);
 
 export function ProgressProvider({ children }: { children: ReactNode }) {
-  const [progress, setProgress] = useState<StoredProgress>(emptyProgress);
+  const [progress, setProgress] = useState<LearningState>(emptyLearningState);
+  const [storageStatus, setStorageStatus] = useState("Loading saved work…");
   const [hydrated, setHydrated] = useState(false);
   const [noteTarget, setNoteTarget] = useState<NoteTarget | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<StoredProgress>;
-        if (parsed && parsed.version === 1) {
-          setProgress({
-            version: 1,
-            completed: parsed.completed ?? {},
-            notes: parsed.notes ?? {},
-          });
-        }
-      }
-    } catch {
-      // Ignore malformed local storage and start fresh.
-    } finally {
+    let cancelled = false;
+    loadLearningState().then(({ state }) => {
+      if (cancelled) return;
+      setProgress(state);
       setHydrated(true);
-    }
+    });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -87,12 +74,32 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
-    } catch {
-      // Storage may be unavailable or full; the site still works without it.
-    }
+    let cancelled = false;
+    setStorageStatus("Saving…");
+    saveLearningState(progress).then((backend) => {
+      if (!cancelled) setStorageStatus(backend === "indexeddb" ? "Saved in this browser" : "Saved in browser fallback storage");
+    }).catch(() => {
+      if (!cancelled) setStorageStatus("Unable to save: browser storage is unavailable or full. Keep this page open to retain your work.");
+    });
+    return () => { cancelled = true; };
   }, [hydrated, progress]);
+
+  const saveDraft = useCallback((key: string, draft: WorkspaceDraft) => {
+    setProgress((current) => ({ ...current, drafts: { ...current.drafts, [key]: { ...draft, updatedAt: Date.now() } } }));
+  }, []);
+  const deleteDraft = useCallback((key: string) => {
+    setProgress((current) => {
+      const drafts = { ...current.drafts };
+      delete drafts[key];
+      return { ...current, drafts };
+    });
+  }, []);
+  const visitExercise = useCallback((chapterSlug: string, exerciseId: string, label: string) => {
+    setProgress((current) => ({ ...current, lastVisited: { chapterSlug, exerciseId, label } }));
+  }, []);
+  const startExercise = useCallback((chapterSlug: string, exerciseId: string) => {
+    setProgress((current) => ({ ...current, started: { ...current.started, [exerciseDraftKey(chapterSlug, exerciseId)]: true } }));
+  }, []);
 
   useEffect(() => {
     if (!noteTarget) {
@@ -163,8 +170,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       const key = noteKey(chapterSlug, exerciseId);
       setNoteDraft(progress.notes[key] ?? "");
       setNoteTarget({ key, chapterSlug, exerciseId, label });
+      visitExercise(chapterSlug, exerciseId, label);
     },
-    [progress.notes],
+    [progress.notes, visitExercise],
   );
 
   const saveNote = useCallback(
@@ -187,6 +195,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     setProgress((current) => {
       const completed = { ...current.completed };
       const notes = { ...current.notes };
+      const drafts = { ...current.drafts };
+      const started = { ...current.started };
       delete completed[chapterSlug];
 
       for (const key of Object.keys(notes)) {
@@ -195,17 +205,31 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      return { ...current, completed, notes };
+      for (const key of Object.keys(drafts)) {
+        if (key.startsWith(`exercise:${chapterSlug}:`) || key.startsWith(`snippet:/chapters/${chapterSlug}:`)) delete drafts[key];
+      }
+      for (const key of Object.keys(started)) {
+        if (key.startsWith(`exercise:${chapterSlug}:`)) delete started[key];
+      }
+      return { ...current, completed, notes, drafts, started, lastVisited: current.lastVisited?.chapterSlug === chapterSlug ? null : current.lastVisited };
     });
   }, []);
 
   const resetAll = useCallback(() => {
-    setProgress(emptyProgress);
+    setProgress(emptyLearningState());
   }, []);
 
   const value = useMemo<ProgressContextValue>(
     () => ({
       hydrated,
+      drafts: progress.drafts,
+      started: progress.started,
+      lastVisited: progress.lastVisited,
+      storageStatus,
+      saveDraft,
+      deleteDraft,
+      visitExercise,
+      startExercise,
       completed: progress.completed,
       getCompletedCount,
       isExerciseComplete,
@@ -227,6 +251,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       resetAll,
       resetChapter,
       toggleExercise,
+      progress.drafts, progress.started, progress.lastVisited, storageStatus,
+      saveDraft, deleteDraft, visitExercise, startExercise,
     ],
   );
 
@@ -291,7 +317,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
             />
             <div className="mt-4 flex items-center justify-between gap-3">
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Notes are saved in this browser only.
+                {storageStatus}
               </p>
               <button
                 type="button"
