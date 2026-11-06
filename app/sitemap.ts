@@ -11,6 +11,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
     changeFrequency: "monthly" as const,
     priority: 0.8,
   }));
+  const exercises = getChapterMetas().flatMap((chapter) => chapter.exercises.map((exercise) => ({
+    url: `${SITE_URL}/practice/${chapter.slug}/${exercise.id}`,
+    changeFrequency: "monthly" as const,
+    priority: 0.5,
+  })));
 
   return [
     {
@@ -20,6 +25,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     ...chapters,
+    ...exercises,
     {
       url: `${SITE_URL}/curriculum`,
       lastModified: new Date(),

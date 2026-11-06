@@ -2,16 +2,35 @@
 
 ## Coverage and interaction
 
-Chapter 1's 213 exercises have dedicated `/practice/fundamentals/ch1-…` pages.
+All 2,612 exercises across the 12 chapters have dedicated
+`/practice/{chapterSlug}/{exerciseId}` pages. Existing Chapter 1 URLs and saved
+draft keys are unchanged. Resume and previous/next navigation work across the
+whole curriculum, including chapter boundaries.
 Exercise prompts remain sourced from the original Markdown. `lib/exercises.ts`
 extracts each exercise through its next label, heading, or horizontal rule; it
-never borrows the next lesson's examples. Authored interaction overrides and
-starter construction live in `lib/chapter-one-exercises.ts`.
+never borrows the next lesson's examples. It also collects fences nested inside
+lists and preserves explicitly named source-file paths. Chapter 1 retains its
+authored interaction overrides in `lib/chapter-one-exercises.ts`. Generalized
+starter construction and prompt-based guidance live in
+`lib/exercise-workspaces.ts`.
 
 Learners record predictions/explanations, edit supplied examples or start blank,
 and explicitly mark completion. There are no automated correctness checks.
-TypeScript is reference material, not Python starter code. Multiple examples are
-separate files; choose which one runs with the entrypoint selector.
+TypeScript is reference material, not Python starter code. Named Python files
+retain their paths so module imports work. Unnamed examples and conflicting
+versions become separate files rather than overwriting each other. Shell, SQL,
+JSON, TOML, YAML, and Dockerfile fences remain their own editable file types;
+the Python runner does not execute them. Fence-free tasks get a blank scratchpad
+and, when applicable, a command/configuration file rather than a fabricated
+solution. Choose which Python file runs with the entrypoint selector.
+
+For Chapters 2–12, the suggested practice mode is inferred from the prompt and
+can be changed by the learner. Runtime profiles identify browser scratchpads,
+prerequisite-dependent tasks, local/native-runtime tasks, and external-service
+tasks. These are conservative guidance, not a claim that every exercise has been
+individually validated against Pyodide. Data/model files and application-specific
+fixtures are not invented or bundled. Imports, earlier definitions, datasets,
+native tools, or service mocks may still need to be supplied by the learner.
 
 ## Persistence
 
@@ -46,8 +65,11 @@ restored into `/workspace` on the next attempt.
   `.py` files trigger compatible Pyodide package loading. Explicit package names
   can be entered; arbitrary pip/native packages are not supported.
 - Script mode uses `runpy.run_path` with `__name__ == '__main__'` and rejects
-  top-level await. Notebook mode permits top-level await and displays the final
-  expression. Neither mode automatically grades an exercise.
+  top-level await. Module mode runs the selected Python path as a dotted module
+  using `runpy.run_module`, allowing package-relative imports. Notebook mode
+  permits top-level await and displays the final expression. No mode grades an
+  exercise. Async exercises that specifically test native script event-loop,
+  threading, or process semantics should be run locally.
 - `display(value)` (also `from learning import display`) renders DataFrames,
   2D arrays, and lists of records as tables, bounded to 100 rows / 20 columns.
 - Matplotlib uses the non-interactive Agg backend. Up to 10 open figures are
@@ -65,7 +87,7 @@ separate; these strong per-attempt guarantees apply to exercise workspaces.
 ## Verification
 
 `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` check the site,
-extraction boundaries, all Chapter 1 exercise IDs, storage migration, language
+extraction boundaries, all 2,612 exercise IDs/routes/starter files, storage migration, language
 highlighting, workspace payload validation, and worker lifecycle deadlines.
 Browser integration additionally verifies real Pyodide imports, stdin, generated
 files, namespace isolation, script/notebook semantics, Stop, pandas/NumPy table

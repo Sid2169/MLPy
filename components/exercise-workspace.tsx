@@ -4,16 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { CodeEditor } from "@/components/code-editor";
 import { useProgress } from "@/components/progress-provider";
 import { exerciseDraftKey, type WorkspaceDraft } from "@/lib/learning-state";
-import { interactionGuidance, type Interaction } from "@/lib/chapter-one-exercises";
+import { interactionGuidance, interactions, languageForFile, type Interaction, type WorkspaceProfile } from "@/lib/exercise-workspaces";
 import { runWorkspace } from "@/lib/workspace-runner";
 import { validWorkspacePath, type WorkspaceArtifact } from "@/lib/workspace-runtime";
 
-type Props = { exerciseId: string; label: string; chapterSlug: string; initial: WorkspaceDraft; interaction: Interaction };
+type Props = { exerciseId: string; label: string; chapterSlug: string; initial: WorkspaceDraft; interaction: Interaction; profile: WorkspaceProfile };
 
-export function ExerciseWorkspace({ exerciseId, label, chapterSlug, initial, interaction }: Props) {
+export function ExerciseWorkspace({ exerciseId, label, chapterSlug, initial, interaction: suggestedInteraction, profile }: Props) {
   const { hydrated, drafts, saveDraft, deleteDraft, storageStatus, startExercise, visitExercise, isExerciseComplete, toggleExercise } = useProgress();
   const key = exerciseDraftKey(chapterSlug, exerciseId);
   const draft = drafts[key] ?? initial;
+  const interaction = interactions.includes(draft.interaction as Interaction) ? draft.interaction as Interaction : suggestedInteraction;
   const [output, setOutput] = useState("");
   const [running, setRunning] = useState(false);
   const [editing, setEditing] = useState(true);
@@ -59,13 +60,18 @@ export function ExerciseWorkspace({ exerciseId, label, chapterSlug, initial, int
     });
   };
 
-  const language = (file: string) => ({ py: "python", json: "json", sql: "sql", toml: "toml", yaml: "yaml", yml: "yaml", ts: "typescript" }[file.split(".").pop() ?? ""] ?? "text");
-
   if (!hydrated) return <p>Loading your saved workspace…</p>;
   return <section className="learning-workspace" aria-label={`Workspace for exercise ${label}`}>
-    <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-300">Browser Python · fresh runtime on every Run · 30s execution limit</p>
-    <div className="workspace-toolbar"><button onClick={run}>{running ? "Stop" : "Run Python"}</button><span role="status">{status}</span></div>
+    <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-300" data-environment={profile.environment}>{profile.label}</p>
+    <p className="text-sm text-slate-600 dark:text-slate-300">{profile.guidance}</p>
+    {profile.notes.map((note) => <p key={note} className="text-xs text-slate-500">{note}</p>)}
+    <div className="workspace-toolbar"><button onClick={run}>{running ? "Stop" : profile.environment === "local" || profile.environment === "external" ? "Run Python scratchpad" : "Run Python"}</button><span role="status">{status}</span></div>
     <fieldset disabled={running} className="contents">
+    <label className="workspace-label">Practice mode
+      <select aria-label="Practice mode" className="workspace-input" value={interaction} onChange={(event) => update({ interaction: event.target.value })}>
+        {interactions.map((type) => <option key={type} value={type}>{type}</option>)}
+      </select>
+    </label>
     <p className="text-sm text-slate-600 dark:text-slate-300">{interactionGuidance[interaction]}</p>
     <label className="workspace-label" htmlFor="exercise-answer">{interaction === "predict" ? "Your prediction and reasoning" : "Your written answer and reasoning"}</label>
     <textarea id="exercise-answer" className="workspace-input" rows={5} value={draft.answer} onChange={(event) => update({ answer: event.target.value })} />
@@ -109,23 +115,23 @@ export function ExerciseWorkspace({ exerciseId, label, chapterSlug, initial, int
       }} />
     </label>
     {fileError ? <p role="alert" className="text-sm text-red-600 dark:text-red-300">{fileError}</p> : null}
-    <CodeEditor language={language(draft.activeFile)} value={draft.files[draft.activeFile] ?? ""} editing={editing && !running} onChange={(value) => update({ files: { ...draft.files, [draft.activeFile]: value } })} onFinish={() => setEditing(false)} onRun={run} />
+    <CodeEditor language={languageForFile(draft.activeFile)} value={draft.files[draft.activeFile] ?? ""} editing={editing && !running} onChange={(value) => update({ files: { ...draft.files, [draft.activeFile]: value } })} onFinish={() => setEditing(false)} onRun={draft.activeFile.endsWith(".py") ? run : undefined} />
     <div className="workspace-toolbar">
       <label>Entrypoint <select aria-label="Python entrypoint" value={draft.entrypoint} onChange={(event) => update({ entrypoint: event.target.value })}>
         {Object.keys(draft.files).filter((name) => name.endsWith(".py")).map((name) => <option key={name}>{name}</option>)}
       </select></label>
-      <label>Execution mode <select aria-label="Execution mode" value={draft.mode ?? "script"} onChange={(event) => update({ mode: event.target.value as "script" | "notebook" })}>
-        <option value="script">Python script</option><option value="notebook">Notebook (top-level await / expression output)</option>
+      <label>Execution mode <select aria-label="Execution mode" value={draft.mode ?? "script"} onChange={(event) => update({ mode: event.target.value as "script" | "notebook" | "module" })}>
+        <option value="script">Python script</option><option value="module">Python module (package-relative imports)</option><option value="notebook">Notebook (top-level await / expression output)</option>
       </select></label>
     </div>
     <label className="workspace-label" htmlFor="workspace-stdin">Standard input (one input() response per line)</label>
     <textarea id="workspace-stdin" className="workspace-input" rows={3} value={draft.stdin} onChange={(event) => update({ stdin: event.target.value })} />
     <label className="workspace-label" htmlFor="workspace-packages">Additional Pyodide packages (comma-separated)</label>
     <input id="workspace-packages" className="workspace-input" placeholder="numpy, pandas, matplotlib" value={draft.packageInput ?? draft.packages?.join(", ") ?? ""} onChange={(event) => update({ packageInput: event.target.value })} />
-    <p className="text-xs text-slate-500">Chapter 1 needs only the standard library. Supported imports are loaded automatically, including those in your other .py files. Use display(data) for tables; matplotlib figures appear after execution. Files generated under /workspace are saved as text (up to 50 files / 1 MB total). input() raises EOFError if supplied input runs out.</p>
+    <p className="text-xs text-slate-500">Supported imports are loaded automatically, including those in your other .py files. Every Run starts fresh with your saved files (30s execution limit). Use display(data) for tables; matplotlib figures appear after execution. Files generated under /workspace are saved as text (up to 50 files / 1 MB total). input() raises EOFError if supplied input runs out.</p>
     <p className="text-xs text-slate-500">This is browser Python, not a terminal or server: Docker, listening HTTP servers, OS processes, native PyTorch/CUDA and arbitrary pip packages are not supported. Network requests depend on browser restrictions. Use a local environment for those tasks.</p>
     </fieldset>
-    {Object.keys(initial.files).length > 1 ? <p className="text-xs text-slate-500">Each provided example has its own file. Choose an example as the Python entrypoint to run it independently.</p> : null}
+    {Object.keys(initial.files).length > 1 ? <p className="text-xs text-slate-500">Named source files keep their paths; unnamed examples are separate files. Choose the Python entrypoint explicitly. Configuration and commands are editable text, not executed by Run Python.</p> : null}
     <p role="status" className="text-xs text-slate-500">{storageStatus}</p>
     {output ? <pre className="workspace-output" aria-label="Python output" aria-live="polite">{output}</pre> : null}
     {artifacts.map((artifact, index) => artifact.kind === "plot" ? <figure key={index}>

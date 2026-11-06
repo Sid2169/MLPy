@@ -77,6 +77,10 @@ if 'matplotlib' in _learning_sys.modules:
 if _learning_data['mode'] == 'script':
     import runpy as _learning_runpy
     _learning_runpy.run_path(_learning_data['entrypoint'], run_name='__main__')
+elif _learning_data['mode'] == 'module':
+    import runpy as _learning_runpy
+    _learning_name = _learning_data['entrypoint'][:-3].replace('/', '.')
+    _learning_runpy.run_module(_learning_name, run_name='__main__', alter_sys=True)
 else:
     from pyodide.code import eval_code_async as _learning_eval
     _learning_namespace = {'__name__': '__main__', '__file__': _learning_data['entrypoint']}

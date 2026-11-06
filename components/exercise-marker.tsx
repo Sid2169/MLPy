@@ -51,12 +51,12 @@ export function ExerciseMarker({
         </span>
       </label>
       <div className="exercise-marker-actions">
-        {chapterSlug === "fundamentals" ? <Link
-          href={`/practice/fundamentals/${exerciseId}`}
+        <Link
+          href={`/practice/${chapterSlug}/${exerciseId}`}
           className="exercise-icon-button text-xs"
           onClick={() => visitExercise(chapterSlug, exerciseId, label)}
           aria-label={`Open workspace for exercise ${label}`}
-        >Open workspace</Link> : null}
+        >Open workspace</Link>
         <button
           type="button"
           className="exercise-icon-button"

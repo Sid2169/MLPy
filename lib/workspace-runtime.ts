@@ -7,7 +7,7 @@ export type WorkspaceRun = {
   entrypoint: string;
   stdin: string;
   packages: string[];
-  mode: "script" | "notebook";
+  mode: "script" | "notebook" | "module";
 };
 
 export function validWorkspacePath(path: string): boolean {

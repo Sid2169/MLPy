@@ -6,7 +6,8 @@ export type WorkspaceDraft = {
   stdin: string;
   packages?: string[];
   packageInput?: string;
-  mode?: "script" | "notebook";
+  mode?: "script" | "notebook" | "module";
+  interaction?: string;
   sourceRevision?: string;
   updatedAt: number;
 };
@@ -48,7 +49,7 @@ export function migrateLearningState(value: unknown): LearningState {
           stdin: typeof draft.stdin === "string" ? draft.stdin : "",
           packageInput: typeof draft.packageInput === "string" ? draft.packageInput : undefined,
           packages: Array.isArray(draft.packages) ? draft.packages.filter((name) => typeof name === "string") : [],
-          mode: draft.mode === "notebook" ? "notebook" : "script",
+          mode: draft.mode === "notebook" || draft.mode === "module" ? draft.mode : "script",
           updatedAt: typeof draft.updatedAt === "number" ? draft.updatedAt : 0,
         };
       }

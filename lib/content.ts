@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseMarkdown, splitDocumentTitle } from "./markdown";
 import type { Chapter, ChapterMeta } from "./types";
+import { extractExercises, type ExerciseDefinition } from "./exercises";
 
 const CONTENT_ROOT = process.cwd();
 const CHAPTER_DIRECTORY_PATTERN = /^chapter-(\d+)$/;
@@ -148,6 +149,18 @@ export function getChapter(slug: string): Chapter | null {
   const { body } = splitDocumentTitle(source);
 
   return { ...meta, body };
+}
+
+const exerciseCache = new Map<string, { source: string; exercises: ExerciseDefinition[] }>();
+
+export function getChapterExercises(slug: string): ExerciseDefinition[] {
+  const chapter = getChapter(slug);
+  if (!chapter) return [];
+  const cached = exerciseCache.get(slug);
+  if (cached?.source === chapter.body) return cached.exercises;
+  const exercises = extractExercises(chapter.body, chapter.number, slug);
+  exerciseCache.set(slug, { source: chapter.body, exercises });
+  return exercises;
 }
 
 export function getChapterLinkMap(): Record<string, string> {
