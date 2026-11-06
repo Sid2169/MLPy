@@ -458,7 +458,7 @@ body {
   position: relative;
 }
 
-.code-frame pre {
+.code-frame > pre {
   overflow-x: auto;
   border: 1px solid rgb(226 232 240);
   border-radius: 0.8rem;
@@ -470,17 +470,72 @@ body {
   tab-size: 2;
 }
 
-.dark .code-frame pre {
+.dark .code-frame > pre {
   border-color: rgb(30 41 59);
   background: rgb(15 23 42);
 }
 
-.code-frame pre code {
+.code-frame > pre code {
   font-family: inherit;
   font-size: inherit;
 }
 
-.code-frame pre [data-line] {
+.code-frame[data-code-active="true"] > pre {
+  display: none;
+}
+
+.code-frame[data-code-active="true"] .code-toolbar {
+  position: static;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  opacity: 1;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.code-editor,
+.code-editor-preview {
+  display: block;
+  width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.8rem;
+  background: rgb(248 250 252);
+  padding: 1rem 1.1rem;
+  color: rgb(30 41 59);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  tab-size: 2;
+}
+
+.code-editor {
+  min-height: 7rem;
+  outline: none;
+  resize: vertical;
+}
+
+.code-editor:focus {
+  border-color: rgb(99 102 241);
+  box-shadow: 0 0 0 2px rgb(99 102 241 / 0.2);
+}
+
+.code-editor-preview {
+  white-space: pre;
+}
+
+.dark .code-editor,
+.dark .code-editor-preview {
+  border-color: rgb(30 41 59);
+  background: rgb(15 23 42);
+  color: rgb(226 232 240);
+}
+
+.code-frame > pre [data-line] {
   display: inline-block;
   width: 100%;
 }
@@ -605,8 +660,18 @@ body {
 
 .code-output-line {
   margin: 0.15rem 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: rgb(51 65 85);
+  font-size: 0.75rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.dark :where(.code-output-line) {
+  color: rgb(203 213 225);
 }
 
 .code-output-stderr {
@@ -739,7 +804,13 @@ details[open] > summary {
     font-size: 0.94rem;
   }
 
-  .code-frame pre {
+  .code-frame > pre {
+    font-size: 0.75rem;
+    padding: 0.9rem;
+  }
+
+  .code-editor,
+  .code-editor-preview {
     font-size: 0.75rem;
     padding: 0.9rem;
   }

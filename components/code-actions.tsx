@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   Check,
   Copy,
   Loader2,
+  Pencil,
   Play,
+  RotateCcw,
   Square,
   Terminal,
 } from "lucide-react";
@@ -27,16 +29,58 @@ export function CodeActions({ language }: CodeActionsProps) {
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "running">("idle");
   const [output, setOutput] = useState<OutputLine[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [editedCode, setEditedCode] = useState<string | null>(null);
   const normalizedLanguage = (language ?? "").toLowerCase();
   const runnable = normalizedLanguage.startsWith("python");
+  const active = editing || editedCode !== null;
 
   const codeText = useCallback(() => {
     const frame = frameRef.current?.closest("[data-code-frame]");
     return frame?.querySelector("code")?.textContent ?? "";
   }, []);
 
+  const readCode = useCallback(() => {
+    if (editing) {
+      return draft;
+    }
+    return editedCode ?? codeText();
+  }, [codeText, draft, editedCode, editing]);
+
+  useEffect(() => {
+    const frame = frameRef.current?.closest("[data-code-frame]");
+    if (!frame) {
+      return;
+    }
+
+    if (active) {
+      frame.setAttribute("data-code-active", "true");
+    } else {
+      frame.removeAttribute("data-code-active");
+    }
+  }, [active]);
+
+  const startEditing = useCallback(() => {
+    setDraft(editedCode ?? codeText());
+    setOutput([]);
+    setEditing(true);
+  }, [codeText, editedCode]);
+
+  const finishEditing = useCallback(() => {
+    setEditedCode(draft === codeText() ? null : draft);
+    setEditing(false);
+  }, [codeText, draft]);
+
+  const resetCode = useCallback(() => {
+    setEditing(false);
+    setEditedCode(null);
+    setDraft("");
+    setOutput([]);
+  }, []);
+
   const copy = useCallback(async () => {
-    const text = codeText();
+    const text = readCode();
     if (!text) {
       return;
     }
@@ -57,7 +101,7 @@ export function CodeActions({ language }: CodeActionsProps) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     }
-  }, [codeText]);
+  }, [readCode]);
 
   const run = useCallback(() => {
     if (running) {
@@ -65,7 +109,7 @@ export function CodeActions({ language }: CodeActionsProps) {
       return;
     }
 
-    const code = codeText();
+    const code = readCode();
     if (!code.trim()) {
       return;
     }
@@ -112,7 +156,7 @@ export function CodeActions({ language }: CodeActionsProps) {
       setRunning(false);
       setStatus("idle");
     }
-  }, [codeText, running]);
+  }, [readCode, running]);
 
   const hasOutput = output.length > 0;
   const statusText = useMemo(() => {
@@ -165,7 +209,81 @@ export function CodeActions({ language }: CodeActionsProps) {
           )}
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
+        <button
+          type="button"
+          className="code-toolbar-button"
+          onClick={editing ? finishEditing : startEditing}
+          aria-label={editing ? "Finish editing code" : "Edit code"}
+          title={editing ? "Done editing" : "Edit code"}
+        >
+          {editing ? (
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          <span>{editing ? "Done" : "Edit"}</span>
+        </button>
+        {active ? (
+          <button
+            type="button"
+            className="code-toolbar-button"
+            onClick={resetCode}
+            aria-label="Reset code"
+            title="Reset to the original snippet"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Reset</span>
+          </button>
+        ) : null}
       </div>
+
+      {editing ? (
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Tab") {
+              event.preventDefault();
+              const target = event.currentTarget;
+              const start = target.selectionStart;
+              const end = target.selectionEnd;
+              setDraft(`${draft.slice(0, start)}  ${draft.slice(end)}`);
+              requestAnimationFrame(() => {
+                target.selectionStart = start + 2;
+                target.selectionEnd = start + 2;
+              });
+              return;
+            }
+
+            if (
+              runnable &&
+              (event.metaKey || event.ctrlKey) &&
+              event.key === "Enter"
+            ) {
+              event.preventDefault();
+              run();
+              return;
+            }
+
+            if (event.key === "Escape") {
+              event.preventDefault();
+              finishEditing();
+            }
+          }}
+          rows={Math.min(30, Math.max(6, draft.split("\n").length))}
+          className="code-editor"
+          aria-label="Edit code block"
+          autoFocus
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          wrap="off"
+        />
+      ) : editedCode !== null ? (
+        <pre className="code-editor-preview" tabIndex={0}>
+          {editedCode}
+        </pre>
+      ) : null}
 
       {runnable && (hasOutput || statusText) ? (
         <div className="code-output" aria-live="polite">
