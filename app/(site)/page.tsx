@@ -42,6 +42,17 @@ export default async function HomePage() {
           <div className="prose prose-slate mt-5 max-w-2xl dark:prose-invert prose-p:text-base prose-p:leading-7">
             {intro}
           </div>
+          <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
+            Created by{" "}
+            <a
+              href="https://sidsingh.vercel.app/"
+              rel="author"
+              className="font-semibold text-indigo-600 underline decoration-indigo-300 underline-offset-4 transition hover:text-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
+            >
+              Siddhartha Suman
+            </a>
+            {" "}— Applied AI Systems Engineer.
+          </p>
 
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <ResumeLearning />

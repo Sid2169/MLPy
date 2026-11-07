@@ -33,6 +33,10 @@ Each chapter is a standalone lesson generated according to [Chapter-generation.m
 3. Verify predictions by running the snippets, then rewrite the tricky ones from memory.
 4. Use the "Before moving on" checklist at the end of each chapter to decide whether to continue or repeat a group.
 
+## Creator
+
+Created by [Siddhartha Suman](https://sidsingh.vercel.app/), an Applied AI Systems Engineer. Visit his portfolio for projects, experience, and contact information.
+
 ## Additional Notes
 
 - **FastAPI and Pydantic** — Check that chapter links resolve after renaming a file.

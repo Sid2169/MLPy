@@ -39,6 +39,17 @@ export default function SiteLayout({
           <div className="mx-auto flex max-w-[1440px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p>
               MLPy — Python for Applied AI and Backend Engineering.
+              <span className="mt-1 block">
+                Created by{" "}
+                <a
+                  href="https://sidsingh.vercel.app/"
+                  rel="author"
+                  className="font-semibold text-indigo-600 underline underline-offset-4 transition hover:text-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
+                >
+                  Siddhartha Suman
+                </a>
+                .
+              </span>
             </p>
             <div className="flex items-center gap-4">
               <Link
